@@ -1,0 +1,925 @@
+---
+title: "Lista 3"
+subtitle: "Eksploracja danych"
+author: "Jakub Wiszniewski, album 282224"
+date: "`r Sys.Date()`, Anno Domini"
+header-includes:    
+  - \usepackage[OT4]{polski}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{graphicx}
+  - \usepackage{float}
+  - \usepackage{caption}
+  - \captionsetup{justification=centering}
+  - \renewcommand{\figurename}{Wykres}
+  - \renewcommand{\tablename}{Tabela}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE,
+                      cache = TRUE)
+knitr::opts_chunk$set(fig.pos = "H",
+                      out.extra = "",
+                      fig.align = "center")
+
+#install.packages("knitr")
+library(knitr)
+
+#install.packages("kableExtra")
+library(kableExtra)
+
+#install.packages("ipred")
+library(ipred)
+
+#install.packages("tidyr")
+library(tidyr)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+#install.packages("reshape2")
+library(reshape2)
+
+#install.packages("patchwork")
+library(patchwork)
+
+#install.packages("class")
+library(class) # KNN
+
+#install.packages("rpart")
+library(rpart) # drzewa klasyfikacyjne
+
+#install.packages("dplyr")
+library(dplyr)
+
+#install.packages("rpart.plot")
+library(rpart.plot) # drzewa klasyfikacyjne
+
+#install.packages("mlbench")
+library(mlbench)
+
+#install.packages("randomForest")
+library(randomForest)
+
+#install.packages("e1071")
+library(e1071) # naiwny Bayes
+
+#install.packages("viridis")
+library(viridis)
+
+#install.packages("HDclassif")
+library(HDclassif)
+
+#install.packages("cluster")
+library(cluster)
+
+#install.packages("ggdendro")
+library(ggdendro)
+
+cols <- viridis_pal(begin = .6, end = 1)
+colors.disc <- as.list(cols(3))
+```
+
+\newpage
+
+# Zaawansowane metody klasyfikacji
+
+## Przygotowanie danych - zbiór `Wine` (przypomnienie)
+
+Celem niniejszej analizy jest zastosowanie i porównanie zaawansowanych metod klasyfikacji. Pod uwagę weźmiemy algorytmy z rodziny klasyfikatorów **bagging** oraz **random forests**, a następnie poddamy analizie działanie algorytmu opartego na wektorach nośnych -- **SVM** dla różnych funkcji jądrowych.
+
+```{r dane_wine}
+# Wybrany zbiór danych - "wine" z biblioteki {HDclassif}
+library(HDclassif)
+data("wine")
+
+#nrow(wine) # 178 obserwacji
+#ncol(wine) # 14 cech
+#str(wine) # klasy oznaczone są jako 1, 2 i 3
+# zmiana typu danych:
+wine$class <- as.factor(wine$class)
+wine$V5 <- as.numeric(wine$V5)
+wine$V13 <- as.numeric(wine$V5)
+```
+
+Zbiorem danych jest `Wine` z pakietu `HDClassif`, który zawiera informacje chemiczne o próbkach trzech gatunków wina, pochodzących z tego samego regionu Włoch, lecz wyprodukowanych z różnych szczepów winorośli. Zbiór składa się ze 178 obserwacji, z których każda reprezentuje jedną próbkę wina. Dla każdej próbki zmierzono 13 cech chemicznych, takich jak m.in. zawartość alkoholu, kwasów fenolowych czy barwników. Zmienne te będą nazywane zmiennymi objaśniającymi, natomiast klasą jest typ wina, oznaczony jako jedna z trzech klas 1, 2 lub 3 pod cechą `class` (konieczna była zmiana typu cechy na typ `factor`). Zbiór danych nie zawiera wartości brakujących.
+
+Dane zostały podzielone na zbiór uczący (70%) i testowy (30%). Następnie sprawdzimy, jak zmienia się skuteczność działania algorytmów dla różnych stosunków podziału danych oraz dla innych parametrów dla poszczególnych metod.
+
+```{r podzial_danych}
+prcnt <- .7 # bierzemy 70% danych do zbioru uczącego
+
+set.seed(123) # powtarzalność losowania zbiorów
+probka.do.nauki <- sample(nrow(wine), round(prcnt*nrow(wine)))
+
+zbior.do.nauki <- wine[probka.do.nauki, ]
+zbior.do.testow <- wine[-probka.do.nauki, ]
+
+klasy.treningowe <- zbior.do.nauki$class
+klasy.testowe <- zbior.do.testow$class
+
+cechy.treningowe <- zbior.do.nauki[, -1]
+cechy.testowe <- zbior.do.testow[, -1]
+```
+
+## Rodziny klasyfikatorów/uczenie zespołowe
+
+Do budowy modeli klasyfikacyjnych win ze zbioru `Wine` zastosujemy zaawansowane algorytmu uczenia zespołowego - metody **bagging** oraz **random forests**, a ich skuteczność zestawiona będzie z klasycznym algorytmem klasyfikującym -- drzewem decyzyjnym.
+
+\newpage
+
+### Klasyfikacja za pomocą algorytmu drzewa decyzyjnego
+
+```{r funkcje_pomocnicze}
+cols <- viridis_pal(begin = .6, end = 1)
+colors.disc <- as.list(cols(3))
+
+cols2 <- viridis_pal(1, .5, .7)
+colors.disc2 <- cols2(2)
+
+procent <- function(X) {
+  X <- round(as.numeric(X), 4)
+  procent <- paste0(100*X, "%")
+  return(procent)
+}
+
+macierz.pomylek <- function(predykcja, testowy = TRUE) {
+  if (testowy == TRUE) {
+    return(table(Predykcja = predykcja, Właściwe = klasy.testowe))
+  } else{
+    return(table(Predykcja = predykcja, Właściwe = klasy.treningowe))
+  }
+  
+}
+
+blad.klasyfikacji <- function(predykcja,
+                              procent = TRUE,
+                              testowy = TRUE) {
+  m.pomylek <- macierz.pomylek(predykcja, testowy)
+  
+  if (testowy == TRUE) {
+    zbior <- zbior.do.testow
+  } else{
+    zbior <- zbior.do.nauki
+  }
+  blad <- 1 - sum(diag(m.pomylek)) / nrow(zbior)
+  
+  if (procent == TRUE) {
+    return(procent(blad))
+  } else{
+    return(round(blad, 4))
+  }
+}
+
+colors <- viridis(2, begin = .6, end = 1)
+
+heatmapa <- function(pred,
+                     testowy = TRUE,
+                     title = "") {
+  m <- macierz.pomylek(pred, testowy)
+  df <- melt(m)
+  
+  ggplot(df, aes(x = Właściwe, y = Predykcja, fill = value)) +
+    geom_tile() +
+    geom_text(aes(label = value), color = "black", size = 5) +
+    scale_fill_gradientn(colours = colors) +
+    labs(
+      title = title,
+      x = "Rzeczywista klasa",
+      y = "Przewidziana klasa",
+      fill = "Liczba elementów"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(hjust = .5)) +
+    coord_fixed(ratio = 1)
+}
+
+zestawienie.heatmap <- function(pred.train, pred.test, title = "") {
+  heatmapa(pred.train, testowy = FALSE, title = "Zbiór treningowy") +
+    heatmapa(pred.test, title = "Zbiór testowy") +
+    plot_annotation(title = title,
+                    theme = theme(plot.title = element_text(hjust = .5, size = 15)))
+}
+
+
+```
+
+Model drzewa wykonamy za pomocą funkcji `rpart` z pakietu `rpart`, przy domyślnych argumentach. Wykres \ref{fig:poka_drzewo} zawiera strukturę takiego drzewa klasyfikacyjnego.
+
+```{r model_drzewa}
+# budowa modelu drzewa
+drzewa.model <- rpart(class ~ ., data = zbior.do.nauki)
+
+drzewa.train.pred <- predict(drzewa.model, newdata = zbior.do.nauki, type = "class")
+drzewa.test.pred <- predict(drzewa.model, newdata = zbior.do.testow, type = "class")
+```
+
+```{r poka_drzewo, fig.cap = "\\label{fig:poka_drzewo}Rysunek przedstawiający działanie modelu drzewa decyzyjnego, wygenerowanego z pakietu `rpart`."}
+rpart.plot(drzewa.model, box.palette = colors.disc)
+```
+
+Algorytm porównuje cechy kolejnych obserwacji z wyznaczonymi progami. Zaczynając od klasy drugiej - po spełnionym pierwszym kryterium przyporządkowuje on element do klasy pierwszej lub trzeciej. Schodząc niżej, porównywane są kolejne cechy do odpowiednich wartości i na tej podstawie są przyporządkowane do prawdziwych grup z większym prawdopodobieństwem. Zwróćmy uwagę na macierz pomyłek tego algorytmu (wykres \ref{fig:heatmapa_drzewo}).
+
+```{r drzewo_zestawienie_heatmap, fig.cap = "\\label{fig:heatmapa_drzewo}"}
+zestawienie.heatmap(drzewa.train.pred, drzewa.test.pred, "Drzewo klasyfikacyjne - macierze pomyłek")
+```
+
+Wartości na przekątnej są znacznie wyższe w przeciwieństwie do elementów poza przekątną, zatem drzewo decyzyjne skutecznie „nauczyło się” cech klas na zbiorze treningowym. W zbiorze treningowym klasa pierwsza i druga były czasami mylone, zatem możliwe jest podobieństwo tych dwóch klas, przynajmniej pod względem niektórych z cech. Na zbiorze testowym metoda drzew klasyfikacyjnych poradziła sobie prawie bezbłędnie - tylko jeden element został źle sklasyfikowany.
+
+\newpage
+
+### Klasyfikacja za pomocą algorytmu bagging
+
+Bagging jest jedną z fundamentalnych technik uczenia zespołowego (ang. *ensemble learning*), która polega na łączeniu wielu klasyfikatorów bazowych w jeden, bardziej stabilny i precyzyjny model predykcyjny. Wykres \ref{fig:bagging_zestawienie_heatmap} prezentuje macierze błędów uzyskane dla tej metody.
+
+```{r model_bagging}
+# bagging na modelu drzewa
+bagging <- bagging(
+  class ~ .,
+  data = zbior.do.nauki,
+  nbagg = 25,
+  minsplit = 1,
+  cp = 0
+)
+
+# predykcje
+bagging.train.pred <- predict(bagging, newdata = zbior.do.nauki)
+bagging.test.pred <- predict(bagging, newdata = zbior.do.testow)
+```
+
+```{r bagging_zestawienie_heatmap, fig.cap = "\\label{fig:bagging_zestawienie_heatmap}Zestawienie macierzy pomyłek dla zbioru treningowego oraz testowego -- metoda bagging."}
+zestawienie.heatmap(bagging.train.pred, bagging.test.pred, "Drzewo klasyfikacyjne - macierze pomyłek")
+```
+
+Klasyfikacja przy użyciu metody bagging wiernie przyporządkowała przewidywane klasy do odpowiadających jej rzeczywistych etykiet. To jedna z metod wykorzystująca całą rodzinę klasyfikatorów.
+
+\newpage
+
+### Klasyfikacja metodą `random forests`
+
+Random Forests jest kolejną z metod zespołowych, która polega na tworzeniu wielu drzew decyzyjnych, zbudowanych na losowych podzbiorach danych oraz przy losowym wyborze cech. Ostateczna klasyfikacja opiera się na łączeniu wyników poszczególnych drzew, co zwiększa stabilność modelu, poprawia jego trafność i zmniejsza ryzyko przeuczenia.
+
+```{r model_rf}
+random.forest <- randomForest(class ~ ., data = zbior.do.nauki)
+
+rf.train.pred <- predict(random.forest, newdata = zbior.do.nauki)
+rf.test.pred <- predict(random.forest, newdata = zbior.do.testow)
+```
+
+```{r rf_zestawienie_heatmap, fig.cap = "\\label{fig:rf_zestawienie_heatmap}Zestawienie macierzy pomyłek dla zbioru treningowego oraz testowego -- metoda random forests."}
+zestawienie.heatmap(rf.train.pred, rf.test.pred, "Drzewo klasyfikacyjne - macierze pomyłek")
+```
+
+Wykres \ref{fig:rf_zestawienie_heatmap} przedstawia macierze pomyłek dla metody random forests. Analogicznie do metody bagging, zbiór `wine` został pomyślnie sklasyfikowany dla zbioru treningowego oraz zbioru testowego bez żadnych pomyłek.
+
+### Podsumowanie wyników uczenia zespołowego
+
+Wyniki poprzedniej analizy nie umożliwiały porównanie wykorzystanych wcześniej metod na poziomie wiarygonym. Zastosujemy w takim razie walidację bootstrap typu .632+, a wyniki oraz porównanie klasyfikacji win przy pomocy metod uczenia zespołowego przedstawiono w tabeli \ref{tab:wyniki_ensemble}.
+
+```{r errorest_ensemble}
+predict.wrapper <- function(object, newdata) predict(object, newdata, type = "class")
+
+# drzewa
+drzewa.errorest <- errorest(
+  class ~ .,
+  data = wine,
+  model = rpart,
+  predict = predict.wrapper,
+  estimator = "632plus",
+  est.para = control.errorest(nboot = 50)
+)
+
+# bagging
+bagging.errorest <- errorest(
+  class ~ .,
+  data = wine,
+  model = ipred::bagging,
+  predict = predict.wrapper,
+  estimator = "632plus",
+  est.para = control.errorest(nboot = 50)
+)
+
+# randomForest
+rf.errorest <- errorest(
+  class ~ .,
+  data = wine,
+  model = randomForest,
+  predict = predict.wrapper,
+  estimator = "632plus",
+  est.para = control.errorest(nboot = 50)
+)
+```
+
+```{r wyniki_ensemble, tab.cap = "\\label{tab:wyniki_ensemble}Porównanie błędów klasyfikacji win algorytów uczenia zespołowego."}
+wyniki.ensemble <- data.frame(
+  Metoda = c(
+    "Drzewo klasyfikacyjne",
+    "Metoda bagging",
+    "Metoda random forests"
+  ),
+  blad.train = c(
+    blad.klasyfikacji(drzewa.train.pred, testowy = FALSE),
+    blad.klasyfikacji(bagging.train.pred, testowy = FALSE),
+    blad.klasyfikacji(rf.train.pred, testowy = FALSE)
+  ),
+  blad.test = c(
+    blad.klasyfikacji(drzewa.test.pred),
+    blad.klasyfikacji(bagging.test.pred),
+    blad.klasyfikacji(rf.test.pred)
+  ),
+  bootstrap.632 = c(
+    procent(drzewa.errorest$error),
+    procent(bagging.errorest$error),
+    procent(rf.errorest$error)
+  )
+)
+
+kable(wyniki.ensemble, format = "latex") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Z tabeli odczytać można, że drzewo decyzyjne z domyślnymi parametrami jest najmniej efektywnym klasyfikatorem spośród omawianych -- osiąga on błąd wielkości około 9% (na podstawie wyników bootstrap.632+), jednak po zastosowaniu metod bagging i random forests, szansa na błędne przyporządkowanie klasy znacznie maleje. Lepszą metodą dla zbioru danych `Wine` okazał się random forests.
+
+## Klasyfikacja metodą wektorów nośnych - SVM
+
+SVM (ang. *Support Vector Machine*) to metoda klasyfikacji, której celem jest znalezienie hiperpłaszczyzny oddzielającej dane należące do różnych klas w możliwie najbardziej optymalny sposób. Optymalność ta polega na maksymalizacji marginesu -- czyli odległości między hiperpłaszczyzną a najbliższymi punktami danych obu klas. Punkty te nazywane są wektorami nośnymi i mają kluczowe znaczenie przy wyznaczaniu granicy decyzyjnej. W sytuacjach, gdy dane nie są liniowo separowalne, SVM wykorzystuje funkcje jądrowe (takie jak funkcje liniowe, wielomianowe czy radialne), które umożliwiają odwzorowanie danych do przestrzeni, w której separacja jest możliwa.
+
+Przeanalizujemy oraz porównamy działanie algorytmu SVM dla wymienionych funkcji jądrowych -- liniowych, wielomianowych i radialnych. Na podstawie testu ANOVA wybieramy najlepiej klasyfikujące cechy: V7, V12, V1, V10, V11 oraz V6. W celu wizualizacji metody SVM, weźmiemy najlepszą dwójkę z nich, czyli V7 oraz V12.
+
+\newpage
+
+### Klasyfikacja SVM z domyślnymi parametrami
+
+Na początku zaprezentujemy efekt działania algorytmu SVM z liniową funkcją jądra. 
+
+```{r svm_linear, fig.cap = "\\label{fig:svm_linear}Wykres punktowy przedstawiający podział obserwacji na grupy (kolory oznaczają poszczególne klasy win). Zacieniony obszar to propozycja prostych, które oddzielają klasy na wykresie punktowym."}
+### LINEAR
+
+# Trenowanie modelu SVM z jądrem liniowym
+svm.linear <- svm(class ~ V7 + V12, data = zbior.do.nauki, kernel = "linear", scale = TRUE)
+
+# Tworzenie siatki punktów do predykcji
+x.range <- seq(min(zbior.do.nauki$V7), max(zbior.do.nauki$V7), length.out = 200)
+y.range <- seq(min(zbior.do.nauki$V12), max(zbior.do.nauki$V12), length.out = 200)
+grid <- expand.grid(V7 = x.range, V12 = y.range)
+
+# Predykcja klas dla siatki
+grid$predicted <- predict(svm.linear, grid)
+
+# Tworzenie wykresu
+ggplot() +
+  geom_tile(data = grid, aes(x = V7, y = V12, fill = predicted), alpha = 0.3) +
+  geom_point(data = zbior.do.nauki, aes(x = V7, y = V12, color = class), size = 2) +
+  scale_fill_manual(values = cols(7)[c(2, 4, 6)]) +
+  scale_color_manual(values = colors.disc) +
+  labs(title = "SVM - jądro liniowe", fill = "Predykcja", color = "Klasa") +
+  theme_minimal() +
+  theme(aspect.ratio = .7)
+
+### WIELOMIANOWY
+
+# Trenowanie modelu SVM z jądrem liniowym
+```
+
+Wykres \ref{fig:svm_linear} przedstawia działanie algorytmu SVM z jądrem liniowym z domyślnymi parametrami. Każdy punkt oznacza obserwację, kolor punktu -- jej rzeczywistą klasę, a zacieniowany obszar oznacza propozycję wyznaczonych granic pomiędzy klasami na wykresie. Można zauważyć, że oddzielenie klas prostymi może powodować błędne przypisanie klas w niektórych przypadkach -- na wykresie wyrażone jest to różnymi kolorami obserwacji i tła. Sprawdźmy teraz jak poradzi sobie algorytm SVM, ale tym razem dla jądra wielomianowego. 
+
+```{r svm_wielomian, fig.cap = "\\label{fig:svm_wielomian}Wykres punktowy przedstawiający podział obserwacji na grupy. Zacieniony obszar to propozycja wielomianów, które oddzielają klasy na wykresie punktowym."}
+svm.wielomian <- svm(class ~ V7 + V12, data = zbior.do.nauki, kernel = "polynomial")
+
+# Predykcja klas dla siatki
+grid$predicted <- predict(svm.wielomian, grid)
+
+# Tworzenie wykresu
+ggplot() +
+  geom_tile(data = grid, aes(x = V7, y = V12, fill = predicted), alpha = 0.3) +
+  geom_point(data = zbior.do.nauki, aes(x = V7, y = V12, color = class), size = 2) +
+  scale_fill_manual(values = cols(7)[c(2, 4, 6)]) +
+  scale_color_manual(values = colors.disc) +
+  labs(title = "Jądro wielomianowe", fill = "Predykcja", color = "Klasa") +
+  theme_minimal() +
+  theme(aspect.ratio = .7)
+```
+
+Algorytm, którego efekt przedstawiono na wykresie \ref{fig:svm_wielomian}, stara się stworzyć taki wielomian, który otacza każdą obserwację ze swojej grupy. Widzimy jednak, że istnieje skupisko obiektów klasy pierwszej o znaczącej wielkości, które znajduje się na obszarze klasy drugiej. Klasa trzecia jest w większości poprawnie klasyfikowana -- żółte elementy znajdują się na żółtym terenie.   
+
+```{r svm_radial, fig.cap = "\\label{fig:svm_radial}Wykres punktowy przedstawiający podział obserwacji na grupy (kolory oznaczają poszczególne klasy win). Zacieniony obszar to propozycja obszarów wyznaczonych radialnie (metodą związaną z rozkładem normalnym), które oddzielają klasy na wykresie punktowym."}
+# Trenowanie modelu SVM z jądrem radialnym
+svm.radial <- svm(class ~ V7 + V12, data = zbior.do.nauki, kernel = "radial")
+
+# Predykcja klas dla siatki
+grid$predicted <- predict(svm.radial, grid)
+
+# Tworzenie wykresu
+ggplot() +
+  geom_tile(data = grid, aes(x = V7, y = V12, fill = predicted), alpha = 0.3) +
+  geom_point(data = zbior.do.nauki, aes(x = V7, y = V12, color = class), size = 2) +
+  scale_fill_manual(values = cols(7)[c(2, 4, 6)]) +
+  scale_color_manual(values = colors.disc) +
+  labs(title = "Jądro radialne", fill = "Predykcja", color = "Klasa") +
+  theme_minimal() +
+  theme(aspect.ratio = .7)
+```
+
+Wykres \ref{fig:svm_radial} przedstawia działanie algorytmu SVM, tym razem dla jądra radialnego (gaussowskiego) o domyślnych parametrach. Obszary wyznaczane są płynnie wokół większości obserwacji odpowiadających swoim klasom. Jednostki należące do klasy trzeciej zostały w większości poprawnie sklasyfikowane, a między klasą pierwszą a drugą występuje mieszanie się klas.
+
+Zestawienie dokładności klasyfikacji win do rzeczywistych odpowiedników przedstawia wykres \ref{svm_porownanie}.
+
+```{r svm_porownanie, fig.cap = "\\label{svm_porownanie}Wykres słupkowy przedstawiający dokładność klasyfikacji win do ich rzeczywistych odpowiedników, z podziałem na metody SVM z jądrami: liniowym, wielomianowym i radialnym."}
+# Predykcje
+zbior.do.testow1 <- zbior.do.testow %>%
+  mutate(
+    pred_linear = predict(svm.linear, .),
+    pred_wielomian = predict(svm.wielomian, .),
+    pred_radial = predict(svm.radial, .)
+  )
+
+# Funkcja obliczająca dokładność dla każdej klasy
+dokladnosc.klasy <- function(y_true, y_pred) {
+  sapply(levels(y_true), function(klasa) {
+    idx <- y_true == klasa
+    mean(y_pred[idx] == y_true[idx])
+  })
+}
+
+# Obliczanie dokładności per klasa
+acc_linear <- dokladnosc.klasy(zbior.do.testow1$class, zbior.do.testow1$pred_linear)
+acc_wielomian <- dokladnosc.klasy(zbior.do.testow1$class, zbior.do.testow1$pred_wielomian)
+acc_radial <- dokladnosc.klasy(zbior.do.testow1$class, zbior.do.testow1$pred_radial)
+
+# Przygotowanie ramki danych
+accuracy.df <- data.frame(
+  Klasa = rep(levels(zbior.do.testow1$class), times = 3),
+  Dokładność = c(acc_linear, acc_wielomian, acc_radial),
+  Metoda = rep(c("Liniowe", "Wielomianowe", "Radialne"), each = length(acc_linear))
+)
+
+# Wykres
+ggplot(accuracy.df, aes(x = Klasa, y = Dokładność, fill = Metoda)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  ylim(0, 1) +
+  labs(
+    title = "",
+    x = "Klasa",
+    y = "Dokładność"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = colors.disc)
+```
+
+Na podstawie wykresu odczytać można zgodność przyporządkowania predykcji do odpowiednich klas. Najgorzej poradził sobie klasyfikator SVM na bazie jądra wielomianowego, osiąga on najniższe wyniki na tle wszystkich funkcji jądrowych, zaś najlepsze wyniki osiąga SVM z jądrem liniowym (reprezentowane przez najwyższe słupki przy każdej z trzech klas).
+
+\newpage
+
+### Wpływ zmiany parametru kosztu na działanie klasyfikacji SVM
+
+Sprawdzimy, jak zmiana parametru kosztu $C$ wpływa na działanie klasyfikacji SVM dla jąder liniowego, wielomianowego oraz radialnego. Zbadamy kolejne wartości kosztu $C$ postaci $C=2^n$ dla $n\in\{-5, -3, -1, 1, 3\}$. Porównanie dokładności przedstawia wykres \ref{fig:znaczenie_kosztu}.
+
+```{r znaczenie_kosztu, fig.cap = "\\label{fig:znaczenie_kosztu}Dokładność klasyfikacji w zależności od jądra i parametru kosztu."}
+koszty <- 2^(seq(-5, 3, 2))
+jadra <- c("linear", "polynomial", "radial")
+
+wyniki.svm <- expand.grid(Jądro = jadra, Koszt = koszty, Dokładność = NA)
+
+for (i in 1:nrow(wyniki.svm)) {
+  model <- svm(
+    class ~ .,
+    data = zbior.do.nauki,
+    kernel = as.character(wyniki.svm$Jądro[i]),
+    cost = wyniki.svm$Koszt[i],
+  )
+  pred <- predict(model, zbior.do.testow)
+  wyniki.svm$Dokładność[i] <- mean(pred == zbior.do.testow$class)
+}
+
+wyniki.svm$Jądro <- factor(wyniki.svm$Jądro, levels = jadra)
+wyniki.svm$Koszt <- factor(wyniki.svm$Koszt, levels = koszty)
+
+ggplot(wyniki.svm, aes(x = Koszt, y = Dokładność, fill = Jądro)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = colors.disc) +
+  labs(
+    x = "Koszt",
+    y = "Dokładność",
+    fill = "Typ jądra"
+  ) +
+  theme_minimal()
+```
+
+W kontekście klasyfikacji SVM, jądro liniowe nie wymaga wysokiego kosztu -- osiąga ono wysoką dokładność już dla najmniejszych $C$ (dla $C = 0.03125$ błąd wynosi `r procent(wyniki.svm$Dokładność[1])`) i z większym kosztem szybko wzrasta do stuprocentowej skuteczności klasyfikacji. Jądra wielomianowe i radialne zaś dla niskich kosztów osiągają słabą skuteczność -- mniej niż połowa obserwacji jest źle sklasyfikowana dla $C=0.03125$. Wraz ze wzrostem $C$, jądra radialne szybciej uzyskują wysoką dokładność w porównaniu do wielomianowych (dla $C = 0.125$ jądro wielomianowe osiąga dokładność `r procent(wyniki.svm$Dokładność[5])`, a radialne `r procent(wyniki.svm$Dokładność[6])`). Co ciekawe - jądro radialne osiągnęło najlepszą skuteczność dla kosztu $C = 0.5$, a z większym kosztem zaczęło spadać, co jest efektem odwrotnym do działania pozostałych jąder.
+
+### Klasyfikator SVM z jądrem radialnym -- wpływ zmiany parametru $\gamma$
+
+Jądro radialne (gaussowskie), poza kosztem $C$, przyjmuje również parametr $\gamma$ (gamma), który wpływa na złożoność (elastyczność) klasyfikatora. Jednoczesna zamiana funkcji kosztu $C$ oraz parametru $\gamma$ zmienia efektywność klasyfikatora SVM z jądrem gaussowskim. Przeprowadźmy analizę, której celem będzie wybór kombinacji omawianych parametrów, w celu usprawnienia algorytmu SVM.
+
+```{r najlepsze_radial, fig.cap = "\\label{fig:najlepsze_radial}Wykres konturowy wypełniony, przedstawiający dokładność klasyfikacji SVM z jądrem radialnym w zależności od parametrów kosztu i gamma, z wyróżnionym punktem o najlepszej kombinacji parametrów. Wykres został przedstawiony w skali logarytmicznej dla ułatwienia wizualizacji."}
+# funkcja tune z e1703
+koszty <- 10^(-3:3)
+gammy <- seq(.001, 100, length.out = 50)
+
+tuning.radial <- tune(
+  svm,
+  zbior.do.nauki[, -1],
+  klasy.treningowe,
+  kernel = "radial",
+  ranges = list(cost = koszty, gamma = gammy)
+)
+
+koszt.best <- tuning.radial$best.parameters$cost
+gamma.best <- tuning.radial$best.parameters$gamma
+
+tuning.radial.df <- tuning.radial$performances[, -4]
+tuning.radial.df$error <- 1 - tuning.radial.df$error
+tuning.radial.df$cost <- log10(tuning.radial.df$cost)
+tuning.radial.df$gamma <- log10(tuning.radial.df$gamma)
+
+ggplot(tuning.radial.df, aes(x = cost, y = gamma, z = error)) +
+  geom_contour_filled() +
+  geom_point(aes(x = log10(koszt.best), y = log10(gamma.best))) +
+  theme_light()
+```
+
+Z wykresu \ref{fig:najlepsze_radial} możemy odczytać, że najlepsza kombinacja parametrów kosztu $C$ i $\gamma$ zachodzi dla $C =$ `r koszt.best` i $\gamma =$ `r gamma.best` lub parametrów z okolicy. Porównajmy teraz dokładność klasyfikacji SVM z jądrem radialnym z parametrami $C = 1, \gamma = 0.5$ a tym z parametrami najlepszymi.
+
+```{r svm_radial_porownanie1, fig.cap = "\\label{fig:svm_radial_porownanie1}"}
+svm.radial1 <- svm(class ~ ., data = zbior.do.nauki, kernel = "radial", C = 1, gamma = .5)
+svm.radial2 <- svm(
+  class ~ .,
+  data = zbior.do.nauki,
+  kernel = "radial",
+  cost = koszt.best,
+  gamma = gamma.best
+)
+
+svm.r.1.pred.train <- predict(svm.radial1, zbior.do.nauki)
+svm.r.1.pred.test <- predict(svm.radial1, zbior.do.testow)
+
+svm.r.2.pred.train <- predict(svm.radial2, zbior.do.nauki)
+svm.r.2.pred.test <- predict(svm.radial2, zbior.do.testow)
+
+zestawienie.heatmap(svm.r.1.pred.train, svm.r.1.pred.test, title = "Macierz pomyłek SVM - domyślne parametry")
+```
+
+Z wykresu \ref{fig:svm_radial_porownanie1} można odczytać, że trzy obiekty klasy 3 zostały sklasyfikowane jako klasa 2 w zbiorze testowym. Zwracając uwagę na to, że w zbiorze treningowym nie wystąpiły żadne pomyłki, możemy podejrzewać zajście zjawiska przeuczenia dla tego modelu.
+
+```{r svm_radial_porownanie2, fig.cap = "\\label{fig:svm_radial_porownanie2}"}
+zestawienie.heatmap(svm.r.2.pred.train, svm.r.2.pred.test, title = "Macierz pomyłek SVM - najlepsze parametry")
+```
+
+Dla modelu z najlepszymi parametrami sytuacja się poprawia -- wszystkie obserwacje ze zbioru treningowego oraz testowego zostały poprawnie przypisane do swoich rzeczywistych klas (wykres \ref{fig:svm_radial_porownanie2}). Wybór optymalnych parametrów do klasyfikatora SVM o jądrze radialnym jest konieczne do poprawności działania modelu.
+
+## Porównanie skuteczności zaawansowanych metod klasyfikacji
+
+Błędy klasyfikacji za pomocą metod omawianych w podrozdziale przedstawia tabela \ref{tab:klasyfikatory_podsumowoanie}.
+
+```{r klasyfikatory_podsumowoanie, tab.cap = "\\label{tab:klasyfikatory_podsumowoanie}Porównanie metod klasyfikacji: drzewa klasyfikacyjne z metodami bagging oraz random forests i klasyfikatory SVM z jądrami liniowym, wielomianowym oraz radialnym (o dostosowanych parametrach)."}
+### BŁĘDY KLASYFIKACJI
+wyniki <- wyniki.ensemble[, c("Metoda", "bootstrap.632")]
+
+err.linear <- procent(1 - max(wyniki.svm[which(wyniki.svm$Jądro == "linear"), "Dokładność"]))
+err.poly <- procent(1 - max(wyniki.svm[which(wyniki.svm$Jądro == "polynomial"), "Dokładność"]))
+err.radial <- blad.klasyfikacji(svm.r.2.pred.test)
+
+row1 <- c("SVM linear", err.linear)
+row2 <- c("SVM wielomian", err.poly)
+row3 <- c("SVM radialne", err.radial)
+
+wyniki <- rbind(wyniki, row1, row2, row3)
+
+kable(wyniki, format = "latex", col.names = c("Metoda", "Błąd klasyfikacji")) %>% 
+kable_styling(latex_options = "HOLD_position")
+```
+
+Najgorzej z klasyfikacją poradziło sobie drzewo klasyfikacyjne z domyślnymi argumentami. Drzewo klasyfikacyjne jest klasyfikatorem niestabilnym, co oznacza, że nie jest odporny na niewielkie zmiany, zatem konieczne jest zastosowanie innego klasyfikatora, dostrojenie jego parametrów lub zastosowanie metod typu bagging lub random forests, których efekt działania również zawarty jest w tej tabeli. Dla algorytmów z rodziny klasyfikatorów widać zdecydowaną poprawę w poprawnym przyporządkowaniu obserwacji do rzeczywistych klas -- bagging osiągnął błąd klasyfikacji na poziomie `r wyniki$bootstrap.632[2]`, a błąd dla random forests wyniósł `r wyniki$bootstrap.632[3]`. Zatem zastosowanie metod pomagających z niestabilnym algorytmem drzewa klasyfikacyjnego przekłada się na znaczną poprawę wyników.
+
+Algorytmy klasyfikatora SVM poradziły sobie bardzo dobrze. Metoda z jądrem liniowym,nie popełnił żadnej pomyłki w przyporządkowaniu, algorytm oparty na bazie jądra wielomianowego wytworzył błąd wielkości `r wyniki$bootstrap.632[5]`, co również nie jest znaczącym błędem, zaś jądro radialne wygenerowało dla metody wektorów nośnych błąd równy `r wyniki$bootstrap.632[6]`. Algorytmy z tej rodziny są zatem w ogólności skuteczniejsze w problemie klasyfikacji danych od drzewa klasyfikacyjnego i metod bagging i random forests. 
+
+Należy mieć jednak na uwadze, że taki rezultat został uzyskany dla zbioru danych `Wine` dla losowego podziału danych (70% - 30%), więc dla innego zbiorów danych przeprowadzenie powyższej analizy mogłoby oddać inne wyniki. 
+
+\newpage
+
+# Analiza skupień - algorytmy grupujące i hierarchiczne
+
+## Opis i przygotowanie danych `Sonar` z pakietu `mlbench`
+
+```{r sonar}
+data("Sonar")
+
+dane <- Sonar
+
+n <- nrow(dane)
+cech <- ncol(dane)
+
+set.seed(123)
+dane <- dane[sample(n, 200), ]
+
+dane.cechy <- dane[, -ncol(dane)]
+dane.etykietki <- dane$Class
+
+K = length(levels(dane.etykietki))
+```
+
+Dane `Sonar` z pakietu `mlbench` zawierają informacje na temat amplitudy sygnałów sonarowych odbitych od obiektów. Zmienną objaśnianą jest cecha `Class` i przyjmuje wartości "M" oraz "R" i reprezentuje typ obiektu -- "M" to mina, a "R" to skała. Pozostałe `r cech - 1` to zmienne objaśniające przyjmujące wartości numeryczne od 0 do 1. Ramka danych zawiera `r sum(is.na(dane))` wartości brakujących oraz wszystkie cechy posiadają poprawny typ.
+
+```{r boxplot_sonar, fig.width = 7, fig.cap = "\\label{boxplot_sonar}Wykres pudełkowy cech zbioru danych `Sonar`."}
+dane.melt <- melt(dane.cechy)
+
+ggplot(dane.melt, aes(x = variable, y = value)) +
+  geom_boxplot(fill = viridis(60, .9, .2, .7)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5))
+```
+Przyjrzyjmy się wykresowi pudełkowemu dla zbioru danych (wykres \ref{fig:boxplot_sonar}. Pomimo, że wartości cech numerycznych przyjmują wartości między 0 a 1, ich wariancje znacząco się różnią. Cechy graniczne mają zdecydowanie mniejsza wariancję niż cechy reprezentowane na środku wykresu. Wymagana jest zatem standaryzacja cech numerycznych, gdyż algorytmy **PAM** oraz **AGNES** podatne są na zróżnicowane wartości zmiennych. Ustandaryzowane cechy przedstawia wykres \ref{fig:boxplot_sonar_stand}.
+
+```{r boxplot_sonar_stand, fig.width = 7, fig.cap = "\\label{boxplot_sonar_stand}Wykres pudełkowy cech zbioru danych `Sonar`."}
+dane.cechy <- as.data.frame(scale(dane.cechy))
+
+dane.melt2 <- melt(dane.cechy)
+
+
+
+ggplot(dane.melt2, aes(x = variable, y = value)) +
+  geom_boxplot(fill = viridis(60, .9, .2, .7)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5))
+```
+
+Obserwacji w ramce danych jest `r n`, jednak zmniejszymy liczbę obserwacji do dwustu biorąc z niej losową próbkę.
+
+## Grupowanie i wizualizacja wyników
+
+W celu wyznaczenia skupisk na zbiorze danych zastosujemy nienadzorowane algorytmy analizy skupień: **PAM**, czyli algorytm reprezentujący metody grupujące analizy skupień oraz **AGNES** -- reprezentant metod hierarchicznych. Przyjmujemy liczbę skupień $K = 2$ równej rzeczywistej liczbie klas.
+
+### Analiza skupień z wykorzystaniem metody PAM
+
+Algorytm PAM to metoda grupowania danych, która wykorzystuje tzw. **medoidy**. Medoidy to najbardziej reprezentatywne obiekty w zbiorze, pełniące rolę centrum danej grupy. Głównym celem tego algorytmu jest zredukowanie sumy odległości wszystkich punktów (poza medoidami) od ich najbliższych medoidów. Proces działania PAM składa się z dwóch etapów: 
+
+* fazy konstrukcji, podczas której zbiór danych zostaje podzielony na $K$ klastrów z przypisanymi medoidami
+* fazy wymiany, w której medoidy są zastępowane innymi obiektami z grupy, aby sprawdzić, czy dzięki temu suma odległości ulegnie zmniejszeniu.
+
+```{r ram_pam_pam, fig.cap = "\\label{fig:ram_pam_pam}Wykres przedstawiający efekt klasyfikacji obserwacji z ramki danych `Sonar` za pomocą algorytmu PAM. Punkty, które mają otoczkę, symbolizują"}
+n <- 200
+
+sonar.pam <- pam(dane.cechy, K)
+
+sonar.pca <- prcomp(dane.cechy)
+sonar.pca.df <- as.data.frame(sonar.pca$x[, 1:3])
+sonar.pca.df$Class <- as.factor(dane.etykietki)
+
+clusters <- sonar.pam$clustering
+clusters <- sapply(clusters, function(x){
+  if(x == 1) return("M")
+  else return("R")
+})
+
+sonar.pca.df$PAM.pred <- as.factor(clusters)
+
+correct <- which(sonar.pca.df$Class == sonar.pca.df$PAM.pred)
+
+ggplot(sonar.pca.df, aes(
+  x = PC1,
+  y = PC2,
+  color = PAM.pred,
+)) +
+  geom_point(data = sonar.pca.df[correct, ],
+             mapping = aes(x = PC1, y = PC2),
+             size = 6, alpha = .15) +
+  geom_point() +
+  theme_minimal() +
+  scale_color_viridis_d(begin = .2, end = .7)
+```
+
+Wykres \ref{fig:ram_pam_pam} jest wizualizacją PCA zredukowanych do drugiego wymiaru zbioru danych `Sonar`, co ułatwia interpretację formowania się grup w danych. Na podstawie algorytmu PAM obserwacje podzielono kolorami na dwie grupy (interpretowane jako mina lub skała). Wokół dobrze sklasyfikowanych danych względem ich rzeczywistych klas dorysowany jest "cień" punktu (dorysowany jest punkt o większym rozmiarze i większej przezroczystości). Procent obserwacji poprawnie sklasyfikowanych wynosi `r procent(length(correct)/n)`, co oznacza, że co około druga obserwacja została błędnie sklasyfikowana. 
+
+Algorytm PAM w takim wypadku wypadł podobnie do metody zgadywania klasy albo rzutu monetą -- skuteczność bliska 50%. Sposób oceny polegający na porównaniu predykcyjnych klas z rzeczywistymi jest **wskaźnikiem zewnętrznym** do oceny jakości analizy skupień. Oznacza to, że do oceny algorytmu zostały wykorzystane informacje o danych spoza zbioru (ponieważ analiza była przeprowadzana na danych z obciętą cechą zmiennej objaśnianej).
+
+Drugim typem oceny jakości algorytmów analizy skupień są **wskaźniki wewnętrzne**, które skuteczność metod oceniają na podstawie wyłącznie danych podleganych analizie. Jednym ze wskaźników wewnętrznych jest wskaźnik *silhouette*. Wartość tego wskaźnika należy do przedziału $[-1, 1]$ i wyliczana jest dla każdego punktu na podstawie "pewności" należenia do swojego klastra.
+
+Wartość *silhouette* interpretujemy następująco:
+
+* Wartość bliska 1 oznacza bardzo silne przywiązanie obiektu do swojego klastra.
+* Wartość około 0 oznacza niepewność przynależności obiektu pomiędzy jednym klastrem a drugim.
+* Wartość zbliżająca się do -1 szacuje, że obserwacja została przypisania do nieodpowiedniego klastra.
+
+Zamiast analizy wskaźnika dla każdej obserwacji, można policzyć ich średnią, która im bliżej wartości 1, tym bardziej wskazuje na poprawną klasyfikację.
+
+```{r silhouette}
+silh.pam <- silhouette(sonar.pam, dist(dane.cechy))
+silh.pam.avg <- mean(silh.pam[, "sil_width"])
+```
+
+Algorytm PAM sklasyfikował obiekty w taki sposób, że ich średnia wartość *silhouette* wynosi `r silh.pam.avg`. Według tego wskaźnika, algorytm PAM jest nieskuteczną metodą klasyfikacji danych `Sonar`.
+
+Przyczyną takiego wyniku może być trudność podziału danych na dwa wyraźne klastry -- być może dane powinny wyróżniać więcej typów obiektów wykrytych sygnałami sonarowymi. Klastry mogą się również nakładać lub sama próbka może być niewystarczająca do pełnej identyfikacji jednostek.
+
+### Analiza skupień z wykorzystaniem metody AGNES
+
+Algorytm AGNES to podejście aglomeracyjne w analizie skupień. Na początku każda obserwacja traktowana jest jako oddzielny klaster. Następnie, w kolejnych etapach, łączy się te klastry, które znajdują się najbliżej siebie, tworząc coraz większe grupy.
+
+W procesie tym można zastosować różne metody mierzenia odległości między klastrami:
+
+- **single**: bierze pod uwagę najmniejszą odległość pomiędzy punktami z dwóch klastrów,
+- **complete**: uwzględnia największą odległość pomiędzy punktami z klastrów,
+- **average**: oblicza średnią odległość pomiędzy wszystkimi parami punktów z klastrów.
+
+```{r agnes}
+sonar.metody <- c("single", "complete", "average")
+sonar.agnes <- lapply(sonar.metody, function(metoda)
+  agnes(dane.cechy, method = metoda))
+names(sonar.agnes) <- sonar.metody
+metoda <- "single"
+
+silhs.agnes <- list()
+dendro.data <- list()
+
+for(metoda in sonar.metody){
+  dendro <- as.dendrogram(sonar.agnes[[metoda]])
+  dendro.data[metoda] <- dendro_data(sonar.agnes[[metoda]])
+  clusters <- cutree(sonar.agnes[[metoda]], k = K)
+  silhs.agnes[[metoda]] <- silhouette(clusters, dist(dane.cechy))
+  
+  clusters <- sapply(clusters, function(x){
+    if(x == 1) return("M")
+    else return("R")
+  })
+  
+  sonar.pca.df[, paste0("AGNES.",metoda,".pred")] <- as.factor(clusters)
+}
+
+silh.mean <- function(metoda){
+  return(mean(silhs.agnes[[metoda]][, "sil_width"]))
+}
+
+silh.agnes.df <- as.data.frame(sapply(sonar.metody, silh.mean))
+names(silh.agnes.df) <- "silhouette"
+silh.agnes.df$accuracy <- NA
+
+for(i in 1:3){
+  silh.agnes.df$accuracy[i] <- length(which(sonar.pca.df[, i + 5] == dane.etykietki))/n
+}
+```
+
+```{r dendro_single, fig.width = 8, fig.height = 3, fig.cap = "\\label{fig:dendro_single}Dendrogram stworzonego algorytmem hierarchicznym AGNES, przy użyciu metody single."}
+ggplot(dendro.data$single, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_segment() +
+  labs(title = paste("AGNES - metoda single"),
+       y = "Wysokość łączenia",
+       x = "") +
+  theme_minimal()
+```
+
+Na wykresie \ref{fig:dendro_single} przedstawiony jest dendrogram przedstawiający działanie algorytmu analizy skupień z metod hierarchicznych - AGNES dla metody single. Ta metoda osiągnęła wskaźnik *silhouette* o średniej wartości `r silh.agnes.df$silhouette[[1]]` (wskaźnik wewnętrzny), a zgodność przyporządkowania klas do ich rzeczywistych wyniosła `r procent(silh.agnes.df$accuracy[[1]])`. Metoda AGNES biorąca pod uwagę najmniejszą odległość między punktami z dwóch klastrów słabo radzi sobie ze zbiorem danych `Sonar`.
+
+```{r dendro_complete, fig.width = 8, fig.height = 3, fig.cap = "\\label{fig:dendro_complete}Dendrogram stworzonego algorytmem hierarchicznym AGNES, przy użyciu metody complete."}
+ggplot(dendro.data$complete, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_segment() +
+  labs(title = paste("AGNES - metoda complete"),
+       y = "Wysokość łączenia",
+       x = "") +
+  theme_minimal()
+```
+
+Wykres \ref{fig:dendro_complete} przedstawia dendrogram uzyskany poprzez działanie algorytmu AGNES dla metody complete, czyli tej uwzględniającej odległości punktów najdalej ułożonych między dwoma klastrami. Tym razem wskaźnik *silhouette* ma średnią wartość `r silh.agnes.df$silhouette[[2]]`), a dokładność klasyfikacji jest równa `r procent(silh.agnes.df$accuracy[[2]])`, co oznacza, że dane zostały sklasyfikowane najprawdopodobniej błędnie.
+
+```{r dendro_average, fig.width = 8, fig.height = 3, fig.cap = "\\label{fig:dendro_average}Dendrogram stworzonego algorytmem hierarchicznym AGNES, przy użyciu metody complete."}
+ggplot(dendro.data$average, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_segment() +
+  labs(title = paste("AGNES - metoda average"),
+       y = "Wysokość łączenia",
+       x = "") +
+  theme_minimal()
+```
+
+Wykres \ref{fig:dendro_average} przedstawia dendrogram uzyskany poprzez działanie algorytmu AGNES dla metody average. czyli tej uwzględniającej odległości punktów najdalej ułożonych między dwoma klastrami. Tym razem wskaźnik *silhouette* ma średnią wartość `r silh.agnes.df$silhouette[[3]]`), a dokładność klasyfikacji jest równa `r procent(silh.agnes.df$accuracy[[3]])`.
+
+Podsumowanie wyników działania algorytmów PAM oraz AGNES przedstawia tabela \ref{tab:podsumowanie_znowu}
+
+```{r podsumowanie_znowu, tab.cap = "\\label{tab:podsumowanie_znowu}Porównanie oceny jakości algorytmów analizy skupień."}
+nowa.ramka <- c(silh.pam.avg, length(correct)/n)
+nowa.ramka <- rbind(nowa.ramka, silh.agnes.df)
+rownames(nowa.ramka) <- c("PAM", "AGNES single", "AGNES complete", "AGNES average")
+nowa.ramka$accuracy <- sapply(nowa.ramka$accuracy, procent)
+
+kable(nowa.ramka, format = "latex") %>% 
+kable_styling(latex_options = "HOLD_position")
+```
+
+Z tabeli wynika, że żaden z algorytmów nie klasyfikuje jednoznacznie danych do klastrów. Najlepiej poradził sobie algorytm AGNES single. Pozostałe metody algorytmu AGNES mają niższy wskaźnik *silhouette*, ale AGNES complete ma nieco minimalnie wyższe *accuracy*. PAM wypada najsłabiej pod względem obu metryk i prawdopodobnie nie jest dobrym wyborem dla tych danych.
+
+## Ocena jakości grupowania
+
+```{r ocena_jakosci, fig.cap = "\\label{fig:ocena_jakosci}Wykresy punktowe porównujące wskaźnik silhouette oraz accuracy (zgodności) dwóch algorytmów analizy skupień -- PAM oraz AGNES average dla kolejnych możliwych liczb grup (klas)."}
+k.max <- 12
+k.range <- K:k.max
+
+oblicz.wskazniki <- function(pred) {
+  silh.avg <- mean(silhouette(as.numeric(pred), dist(dane.cechy))[, "sil_width"])
+
+  pred.labels <- sapply(pred, function(x) {
+    if (x == 1) return("M") 
+    else return("R")
+  })
+
+  accuracy <- sum(pred.labels == dane.etykietki)/n
+
+  list(silhouette = silh.avg, accuracy = accuracy)
+}
+
+porownanie.df <- expand.grid(metoda = c("PAM", "AGNES average"), klas = k.range) %>%
+  rowwise() %>%
+  mutate(
+    clusters = if(metoda == "PAM") {
+      list(pam(dane.cechy, k = klas)$clustering)
+    } else {
+      list(cutree(agnes(dane.cechy, method = "average"), k = klas))
+    },
+    wskazniki = list(oblicz.wskazniki(clusters))
+  ) %>%
+  unnest_wider(wskazniki)
+
+p1 <- ggplot(porownanie.df, aes(x = klas, color = metoda)) +
+  geom_point(mapping = aes(y = silhouette), size = 3) +
+  geom_line(mapping = aes(y = silhouette), linewidth = 1, linetype = 3) +
+  theme_minimal() +
+  lims(y = c(0, 1)) +
+  scale_color_viridis_d(begin = .1, end = .4) + 
+  labs(title = "wskaźnik silhouette") +
+  theme(aspect.ratio = 1)
+
+p2 <- ggplot(porownanie.df, aes(x = klas, color = metoda)) +
+  geom_point(mapping = aes(y = accuracy), size = 3) +
+  geom_line(mapping = aes(y = accuracy),linewidth = 1) +
+  theme_minimal() +
+  lims(y = c(.35, .6)) +
+  scale_color_viridis_d(begin = .5, end = .8) + 
+  labs(title = "wskaźnik accuracy") +
+  theme(aspect.ratio = 1)
+
+(p1 | p2) + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+Na wykresie \ref{fig:ocena_jakosci} przedstawione są wartości wskaźnika *silhouette* oraz zgodności przewidzianych klas do rzeczywistych. Jesteśmy w stanie zauważyć dla algorytmu AGNES z miarą average powolny spadek obu wskaźników, zaś dla PAM -- nieznaczne skoki dla wskaźnika accuracy (na poziomie pięciu, dziesięciu punktów procentowych), ale jednocześnie maleje jego wskaźnik *silhouette*. Oznacza to, że pomimo analizy działania algorytmów w celu wykrycia większej liczby klas, najbardziej prawdopodobną sytuacją jest grupowanie się danych w dwa skupiska.
+
+## Interpretacja wyników grupowania -- charakterystyki skupienia
+
+```{r rozklad_najwazniejszych, fig.width = 7, fig.height = 6.3, fig.cap = "\\label{fig:rozklad_najwazniejszych}Wykresy pudełkowe przedstawiające rozkład wartości najbardziej zróżnicowanych cech w obu klastrach."}
+dane.z.klastrem <- dane.cechy %>%
+  mutate(klaster = sonar.pam$clustering)
+
+# Oblicz różnicę średnich między klastrami
+roznice <- dane.z.klastrem %>%
+  group_by(klaster) %>%
+  summarise(across(where(is.numeric), mean)) %>%
+  summarise(across(everything(), ~abs(diff(.)))) %>%
+  pivot_longer(everything(), names_to = "cecha", values_to = "roznica") %>%
+  arrange(desc(roznica))
+
+# Wybierz np. 5 najbardziej różnicujących cech
+top.cechy <- head(roznice$cecha, 9)
+
+# Przekształć dane do formatu długiego
+dane.long <- melt(cbind(dane.cechy, klaster = as.factor(sonar.pam$clustering)),
+                  id.vars = "klaster")
+
+# Filtruj tylko najważniejsze cechy
+dane.top <- subset(dane.long, variable %in% top.cechy)
+
+# Rysuj boxploty
+ggplot(dane.top, aes(x = klaster, y = value, fill = klaster)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_bw() +
+  labs(x = "Skupienie", y = "Wartość cechy", fill = "Skupienie") +
+  theme(axis.text.x = element_text(angle = 0)) +
+  scale_fill_viridis_d(begin = .2, end = .6)
+```
+
+Wykres \ref{fig:rozklad_najwazniejszych} przedstawia wykresy pudełkowe dziewięciu cech danych `Sonar`, które są najbardziej zróżnicowane dla klastrów. Charakteryzują się one położeniem średnich na różnych wysokościach oraz niepokrywającymi się rozstępami kwartylowymi. Najbardziej odróżniającymi cechami są zmienne V15, V16, V17, V18, V19, V20, V21, V28, V29. 
+
+Każda cecha reprezentuje fragment amplitudy odczytu sygnału sonaru, zatem widzimy, że największe zróżnicowanie dzieje się między krańcami okresu, a jego środkiem. Zauważmy, że cechy od piętnastej do dwudziestej pierwszej w jednym okresie oznaczają wzrost danego sygnału, zaś cechy od numeru dwudziestego ósmego spadają (reprezentację cech można zauważyć na wykresie \ref{fig:boxplot_sonar}). Te cechy zostały wybrane przez algorytm PAM, który jednocześnie wyznacza medoidy danych klastrów. Przyjrzyjmy się wartościom cech centrów skupisk.
+
+```{r wybrane_medoidy, tab.cap = "\\label{tab:wybrane_metody}Tabela przedstawiająca medoidy wyznaczone przez algorytm PAM."}
+medoidy <- Sonar[sonar.pam$id.med, top.cechy]
+
+kable(t(medoidy), format = "latex", col.names = (paste0("ID:", rownames(medoidy)))) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Na podstawie tabeli \ref{tab:wybrane_medoidy} można zauważyć istotną różnicę dwóch medoidów. Cech wyróżniających jest więcej, jednak na potrzeby wizualizacji przedstawiono tylko te najbardziej wpływowe na klasyfikację.
+
+## Wnioski
+
+Ze względu na znaczne różnice w wariancjach zmiennych w zbiorze `Sonar`, przed zastosowaniem algorytmów klasteryzacji konieczne było przeprowadzenie standaryzacji danych. W przypadku algorytmu PAM uzyskano średni wskaźnik *silhouette* równy `r silh.pam.avg`. Spośród wszystkich badanych metod wyznaczania odległości w algorytmie AGNES (single, complete, average), najlepszy rezultat -- średnią wartość *silhouette* na poziomie `r silh.agnes.df$silhouette[1]` -- osiągnęła metoda single. Najbardziej odpowiednią liczbą klastrów dla analizowanego zbioru okazało się K = 2. Przy większych, mniej trafnych wartościach K, algorytmy PAM oraz AGNES działały z mniejszą skutecznością. Medoidy dobrze odzwierciedlały charakterystyczne cechy swoich klastrów, a same skupienia wykazywały zgodność z rzeczywistym podziałem klas w danych.
+
+
+

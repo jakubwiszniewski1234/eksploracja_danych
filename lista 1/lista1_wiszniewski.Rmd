@@ -1,0 +1,1059 @@
+---
+title: "Telco - raport"
+subtitle: "Analiza danych firmy telekomunikacyjnej. Dlaczego klienci odchodzą?"
+author: "Jakub Wiszniewski, 282224"
+date: "`r Sys.Date()`, Anno Domini"
+header-includes:
+   - \usepackage[OT4]{polski}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+  html_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+fontsize: 12pt
+tables: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(fig.pos = "H",
+                      out.extra = "",
+                      fig.align = "center",
+                      cache = TRUE)
+
+
+library(knitr)
+library(kableExtra)
+
+#install.packages("viridis")
+library("viridis")
+
+#install.packages("e1071")
+library(e1071)
+```
+
+# Wczytanie i przygotowanie danych
+
+Niniejsza analiza będzie dotyczyć danych z pliku `WA_Fn-UseC_-Telco-Customer-Churn.csv`, które zawierają informacje na temat klientów w firmie sieci telekomunikacyjnej Telco.
+
+```{r dane}
+# Wczytujemy dane
+dane <- read.csv(file = "WA_Fn-UseC_-Telco-Customer-Churn.csv",
+                 stringsAsFactors = TRUE)
+```
+
+Zmienna jakościowa `SeniorCitizen` wczytała się jako typ numeryczny. Zmienimy zatem go na typ `factor`.
+
+```{r strdane}
+# Zmieniamy jedną zmienną jakościową na typ factor
+dane$SeniorCitizen <- as.factor(dane$SeniorCitizen)
+```
+
+Tabela \ref{tab:pokaz_danych} zawiera krótkie opisy przechowywanych danych
+
+```{r pokaz_danych, echo = FALSE}
+dane$customerID <- as.character(dane$customerID)
+typy = sapply(colnames(dane), function(x) return(class(dane[, x])))
+opis.cech <- data.frame(
+  cecha = colnames(dane),
+  typ = typy
+)
+opisy <- c(
+  "Unikatowy identyfikator klienta",
+  "Płeć (Kobieta/Mężczyzna)",
+  "Status seniora(Nie/Tak)",
+  "Posiada partnera(Nie/Tak)",
+  "Posiada osoby zależne(Nie/Tak)",
+  "Liczba miesięcy korzystania z usług",
+  "Klient pobiera usługi telefoniczne(Nie/Tak)",
+  "Klient posiada wiele linii\ntelefonicznych(Nie/Brak usług telefonicznych/Tak)",
+  "Klient pobiera usługi dostarczania internetu(Nie/DSL/Światłowód)",
+  "Klient pobiera usługę bezpieczeństwa w sieci(Nie/Brak internetu/Tak)",
+  "Klient pobiera usługę kopii zapasowej(Nie/Brak internetu/Tak)",
+  "Klient pobiera usługę ochrony urządzeń(Nie/Brak internetu/Tak)",
+  "Klient pobiera usługę wsparcia technicznego(Nie/Brak internetu/Tak)",
+  "Klient pobiera usługi streamingu TV(Nie/Brak internetu/Tak)",
+  "Klient pobiera usługi streamingu filmów(Nie/Brak internetu/Tak)",
+  "Umowa zawarta przez klienta(Miesięczna/Roczna/Dwuletnia)",
+  "Faktura elektroniczna(Nie/Tak)",
+  "Metoda płatności(Karta kredytowa/Czek/Przelew)",
+  "Miesięczny koszt pobieranych usług",
+  "Całkowity koszt pobieranych usług",
+  "Klient zrezygnował z usług naszej firmy(Nie/Tak)"
+)
+
+opis.cech <- cbind(opis.cech, opisy)
+kable(opis.cech,
+      format = "latex",
+      caption = "Krótki opis cech danych",
+      booktabs = TRUE,
+      row.names = FALSE,
+      ) %>%
+  kable_styling(latex_options = "HOLD_position", font_size = 10)
+```
+
+Nasze dane zawierają `r nrow(dane)` obserwacji, u każdej zbadano `r ncol(dane)` cech. Cechy są zarówno typu numerycznego, całkowitego i zmiennoprzecinkowego, ale też typu znakowego (`character`). Niektóre z cech traktujemy jako zmienne faktorujące `factor`.
+
+Zauważmy, że nie każda cecha będzie nam potrzebna. Na przykład nasze dane zawierają osobny identyfikator danych - przy analizie nie będzie brana ona pod uwagę.
+
+```{r usuniecie_zmiennej_CustomerID}
+# Usuwamy niepotrzebne kolumny
+dane <- dane[, -1]
+```
+
+```{r gauihga,echo = FALSE}
+kolumny <- colnames(dane)
+```
+
+```{r brakujace, echo = FALSE}
+wszystkich.brakujacych <- sum(is.na(dane))
+brakujace.w.kolumnach <- apply(
+  dane,
+  MARGIN = 2,
+  FUN = function(x)
+    sum(is.na(x))
+)
+brakujace.kolumny <- kolumny[brakujace.w.kolumnach > 0]
+
+```
+
+Dane zawierają `r wszystkich.brakujacych` wartości brakujących, które znajdują się w kolumnie `r brakujace.kolumny`. Zwróćmy uwagę na tabelę \ref{tab:brakujace_czemu}.
+
+```{r brakujace_czemu, echo = FALSE, results = "markup"}
+u.ktorych.brakuje <- is.na(dane[, brakujace.kolumny])
+brakujace.na.pokaz <- dane[u.ktorych.brakuje, c("tenure", "TotalCharges")]
+brakujace.na.pokaz2 <- cbind(rep("...", wszystkich.brakujacych), brakujace.na.pokaz)
+kable(
+  brakujace.na.pokaz2,
+  format = "latex",
+  col.names = c("ID", "Pozostałe cechy", "tenure", "TotalCharges"),
+  caption = "Wiersze z wartościami brakującymi",
+  booktabs = TRUE
+) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Każda brakująca obserwacja w cesze `TotalCharges` równocześnie posiada dla cechy `tenure` wartość $0$ miesięcy, co oznacza, że prawdopodobnie ów klienci nie zdążyli jeszcze wpłacić żadnej kwoty.
+
+Więcej informacji o danych znajduje się na stronie [**Kaggle**](https://www.kaggle.com/datasets/blastchar/telco-customer-churn).
+
+\newpage
+
+# Analiza opisowa
+
+## Wskaźniki sumaryczne dla zmiennych ilościowych
+
+Wyznaczmy podstawowe wskaźniki sumaryczne dla cech obserwacji, najpierw dla zmiennych ilościowych. Wyniki przedstawione są w tabelce \ref{tab:summary2}.
+
+```{r summary, echo = FALSE, message = FALSE}
+jakosciowe.z.churn <- kolumny[sapply(kolumny, function(x)
+  is.factor(dane[, x]))]
+jakosciowe <- jakosciowe.z.churn[-length(jakosciowe.z.churn)]
+ilosciowe <- kolumny[sapply(kolumny, function(x)
+  ! is.factor(dane[, x]))]
+```
+
+```{r summary2, echo = FALSE}
+my.summary <- function(X) {
+  X <- as.numeric(X)
+  wynik <- c(
+    min(X, na.rm = TRUE),
+    quantile(X, probs = .25, na.rm = TRUE),
+    median(X, na.rm = TRUE),
+    quantile(X, .75, na.rm = TRUE),
+    max(X, na.rm = TRUE),
+    mean(X, na.rm = TRUE),
+    var(X, na.rm = TRUE),
+    sd(X, na.rm = TRUE),
+    IQR(X, na.rm = TRUE),
+    skewness(X, na.rm = TRUE),
+    kurtosis(X, na.rm = TRUE)
+  )
+  names(wynik) <- c("Min",
+                    "Q1",
+                    "Mediana",
+                    "Q3",
+                    "Max",
+                    "Średnia",
+                    "Wariancja",
+                    "Odch. std.",
+                    "IQR",
+                    "Skośność",
+                    "Kurtoza")
+  return(wynik)
+}
+
+tabelka <- sapply(dane[, ilosciowe], my.summary)
+kable(tabelka, 
+      format = "latex", 
+      caption = "Wskaźniki sumaryczne dla zmiennych ilościowych",
+      digits = 4) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Zauważmy, że kurtoza dla zmienych `tenure`, `MonthlyCharges` i `TotalCharges` jest ujemna, zatem wykresy ich rozkładów są bardziej płaskie od rozkładu normalnego (są platykurtyczne).
+
+Dla danej `tenure` skośność wynosi $0.239 > 0$, co oznacza, że rozkład jest prawostronnie skośny (chociaż nieznacząco). To oznacza, że klienci korzystają z usług naszej firmy zazwyczaj przez mniejszą liczbę miesięcy.
+
+Cecha `MonthlyCharges` ma skośność równą $-0.220 < 0$, zatem jej rozkład jest lewostronnie skośny. Interpretować to można tak, że klienci płacą zazwyczaj większe kwoty miesięcznie.
+
+Z kolei skośność `TotalCharges` jest równa $0.961 > 0$, co oznacza, że rozkład całkowitych opłat jest bardzo prawostronnie skośny.
+
+## Wykresy
+
+### Wykresy zmiennych ilościowych
+
+```{r ilosciowe_bro, echo = FALSE, fig.width = 6, fig.height= 4.5, fig.cap = "\\label{fig:ilosciowe_bro}Histogramy i wykresy pudełkowe zmiennych tenure, MonthlyCharges i TotalCharges"}
+par(mfrow = c(2, 3))
+hist(
+  dane$tenure,
+  breaks = 20,
+  main = "Czas pobierania usług",
+  xlab = "Czas (w miesiącach)",
+  ylab = "Liczba klientów",
+  col = "seagreen"
+)
+hist(
+  dane$MonthlyCharges,
+  breaks = 20,
+  main = "Miesięczne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Liczba klientów",
+  col = "seagreen3"
+)
+hist(
+  dane$TotalCharges,
+  breaks = 20,
+  main = "Całościowe opłaty",
+  xlab = "Wysokość opłat",
+  ylab = "Liczba klientów",
+  col = "seagreen1"
+)
+boxplot(dane$tenure,
+        main = "Czas pobierania usług",
+        ylab = "Czas (w miesiącach)",
+        col = "seagreen")
+boxplot(
+  dane$MonthlyCharges,
+  main = "Miesięczne opłaty",
+  ylab = "Wysokość opłaty",
+  col = "seagreen3"
+)
+boxplot(
+  dane$TotalCharges,
+  main = "Całościowe opłaty",
+  ylab = "Wysokość opłat",
+  col = "seagreen1"
+)
+par(mfrow = c(1, 1))
+```
+
+Dla zmiennej `tenure`:
+
+-   rozkład czasu pobierania usług w miesiącach jest raczej równomierny, ze skokiem na pierwsze miesiące
+-   wskazuje to na grupę klientów, którzy zaczęli korzystać z usług naszej firmy niedawno, ale też na tych, którzy szybko z nich zrezygnowali
+
+Dla zmiennej `MonthlyCharges`:
+
+-   najwięcej klientów korzysta z najtańszych usług naszej firmy
+-   można zauważyć, że znaczna część klientów płaci miesięcznie pomiędzy 60 a 120 dolarów
+-   na wykresie pudełkowym mediana jest wyżej w pudełku, co świadczy o prawostronnej asymetrii rozkładu
+
+Dla zmiennej `TotalCharges`:
+
+-   zdecydowana większość klientów zapłaciła od 0 do 4000 dolarów za całe usługi, a istotny procent klientów zapłaciło nawet mniej niż 2000, co świadczy o prawostronnej asymetrii rozkładu
+-   istnieją jednak klienci, którzy zapłacili dla naszej firmy więcej, jednak znajdują się oni w dłuższym ogonie
+
+### Wykresy zmiennych jakościowych
+
+```{r jakosciowy.gender, echo = FALSE, fig.cap="\\label{fig:jakosciowy.gender}Wykres zmiennej gender"}
+dane.slupkowe <- sapply(jakosciowe, function(x) table(dane[, x]))
+names(dane.slupkowe$gender) <- c("Kobiet", "Mężczyzn")
+barplot(dane.slupkowe[["gender"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Zmienna gender",
+        ylab = "Liczba klientów")
+```
+
+Na podstawie wykresu \ref{fig:jakosciowy.gender} jesteśmy w stanie stwierdzić, że rozkład płci u naszych klientów jest jednostajny.
+
+```{r jakosciowy.senior, echo = FALSE, fig.cap="\\label{fig:jakosciowy.senior}Wykres liczebności seniorów"}
+names(dane.slupkowe$SeniorCitizen) <- c("Nie-senior", "Senior")
+barplot(dane.slupkowe[["SeniorCitizen"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Liczba seniorów",
+        ylab = "Liczba klientów")
+```
+
+Zdecydowana większość klientów nie jest seniorami, osób w podeszłym wieku jest `r dane.slupkowe$SeniorCitizen[["Senior"]]`.
+
+```{r jakosciowy.partner, echo = FALSE, fig.cap="\\label{fig:jakosciowy.partner}Wykres osób posiadających partnera"}
+names(dane.slupkowe$Partner) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["Partner"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Klient posiada partnera",
+        ylab = "Liczba klientów")
+```
+
+Z rysunku \ref{fig:jakosciowy.partner} wynika, że liczba klientów posiadających partnera jest bliska liczbie tych, którzy partnerów nie mają, samotników jest bowiem około `r round(dane.slupkowe$Partner[[1]]/nrow(dane)*100)`%.
+
+```{r jakosciowy.zalezne, echo = FALSE, fig.cap="\\label{fig:jakosciowy.zalezne}Wykres osób posiadających partnera"}
+names(dane.slupkowe$Dependents) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["Dependents"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Klient posiada osoby podległe",
+        ylab = "Liczba klientów")
+```
+
+Rysunek \ref{fig:jakosciowy.zalezne} przedstawia fakt, że zdecydowana większość klientów nie posiada osób im podległych (czyli głównie niepełnoletnich dzieci).
+
+```{r jakosciowy.phone, echo = FALSE, fig.cap="\\label{fig:jakosciowy.phone}Wykres osób, którzy pobierają usługi telefoniczne z jedną lub wieloma liniami"}
+par(mfrow = c(1, 2))
+names(dane.slupkowe$PhoneService) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["PhoneService"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usług\n telefonicznych",
+        ylab = "Liczba klientów")
+dane.slupkowe$MultipleLines <- dane.slupkowe$MultipleLines[-2]
+names(dane.slupkowe$MultipleLines) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["MultipleLines"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z wielu\n linii naraz",
+        ylab = "Liczba klientów")
+par(mfrow = c(1, 1))
+```
+
+Zdecydowana większość klientów (aż `r round(dane.slupkowe$PhoneService[["Tak"]]/nrow(dane)*100)`%) korzysta z usług telefonicznych w naszej firmie. Jednak osób, które korzystają z wielu linii telefonicznych, jest mniej.
+
+```{r jakosciowy.internet, echo = FALSE, fig.cap="\\label{fig:jakosciowy.internet}Wykres osób korzystających z usług internetowych"}
+names(dane.slupkowe$InternetService) <- c("Kablówka", "Światłowód", "Brak")
+barplot(dane.slupkowe[["InternetService"]], 
+        col = viridis(3, .7, .2, .9),
+        main = "Usługi internetowe wybierane\n przez klienta",
+        ylab = "Liczba klientów")
+```
+
+Warto zauważyć, że około `r round(dane.slupkowe$InternetService[["Brak"]]/nrow(dane)*100)`% nie pobiera usług internetowych w naszej firmie (rysunek \ref{fig:jakosciowy.internet}). Spośród klientów, którzy jednak pobierają tę usługę, góruje światłowód.
+
+```{r jakosciowy.internetowe, echo = FALSE, fig.cap="\\label{fig:jakosciowy.internetowe}Liczebność klientów wybierających dane usługi internetowe"}
+par(mfrow = c(2, 3))
+dane.slupkowe$OnlineSecurity <- dane.slupkowe$OnlineSecurity[-2]
+names(dane.slupkowe$OnlineSecurity) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["OnlineSecurity"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usługi\n bezpieczeństwa w sieci",
+        ylab = "Liczba klientów")
+dane.slupkowe$OnlineBackup <- dane.slupkowe$OnlineBackup[-2]
+names(dane.slupkowe$OnlineBackup) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["OnlineBackup"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usługi\n kopii zapasowej",
+        ylab = "Liczba klientów")
+dane.slupkowe$TechSupport <- dane.slupkowe$TechSupport[-2]
+names(dane.slupkowe$TechSupport) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["TechSupport"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usługi\n wsparcia technicznego",
+        ylab = "Liczba klientów")
+dane.slupkowe$DeviceProtection <- dane.slupkowe$DeviceProtection[-2]
+names(dane.slupkowe$DeviceProtection) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["DeviceProtection"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usługi\n ochrony urządzeń",
+        ylab = "Liczba klientów")
+dane.slupkowe$StreamingTV <- dane.slupkowe$StreamingTV[-2]
+names(dane.slupkowe$StreamingTV) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["StreamingTV"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usługi\n streamingu telewizji",
+        ylab = "Liczba klientów")
+dane.slupkowe$StreamingMovies <- dane.slupkowe$StreamingMovies[-2]
+names(dane.slupkowe$StreamingMovies) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["StreamingMovies"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Korzysta z usług\n streamingu filmów",
+        ylab = "Liczba klientów")
+par(mfrow = c(1, 1))
+```
+
+Ponad połowa osób nie korzysta z dodatkowych proponowanych usług internetowych, najbliżej jednak klienci są podzieleni przy usłudze streamingu filmów.
+
+```{r jakosciowy.umowa, echo = FALSE, fig.cap="\\label{fig:jakosciowy.umowa}Wykres liczby osób wybierających daną umowę"}
+names(dane.slupkowe$Contract) <- c("Miesięczna", "Roczna", "Dwuletnia")
+barplot(dane.slupkowe[["Contract"]], 
+        col = viridis(3, .7, .2, .9),
+        main = "Umowa",
+        ylab = "Liczba klientów")
+```
+
+Najpopularniejszą umową jest umowa miesięczna.
+
+```{r jakosciowy.faktury, echo = FALSE, fig.cap="\\label{fig:jakosciowy.faktury}Wykres słupkowy liczby osób decydujących się na fakturę elektroniczną"}
+par(mfrow = c(1, 1))
+names(dane.slupkowe$PaperlessBilling) <- c("Nie", "Tak")
+barplot(dane.slupkowe[["PaperlessBilling"]], 
+        col = viridis(2, .7, .2, .9),
+        main = "Faktura elektroniczna",
+        ylab = "Liczba klientów")
+```
+
+Na podstawie rysunku \ref{fig:jakosciowy.faktury} można stwierdzić, iż klienci częściej wybierają fakturę wysłaną elektronicznie.
+
+```{r jakosciowy.platnosci, echo = FALSE, fig.cap="\\label{fig:jakosciowy.platnosci}Wykres liczby osób wybierających metodę płatności"}
+names(dane.slupkowe$PaymentMethod) <- c("Automatyczny\nprzelew bankowy", "Automatyczna\nkarta kredytowa", "Czek przesłany\nelektronicznie", "Czek przesłany\npocztą")
+barplot(dane.slupkowe[["PaymentMethod"]], 
+        col = viridis(4, .7,.2, .9),
+        main = "Metoda płatności",
+        ylab = "Liczba klientów",
+        cex.names = .7)
+par(mfrow = c(1, 1))
+```
+
+Najwięcej osób decyduje się płacić elektronicznym czekiem - aż `r round(dane.slupkowe$PaymentMethod[3]/nrow(dane)*100)`% spośród wszystkich klientów!
+
+### Wykresy rozrzutu dla zmiennych ilościowych
+
+```{r rozrzuty, echo = FALSE, fig.cap="\\label{fig:rozrzuty}Zależność pomiędzy zmiennymi ilościowymi", fig.width = 5.5, fig.height = 5}
+pairs(dane[, ilosciowe], col = viridis(1, .3, .3, .8), pch = 1, main = "Zależność pomiędzy zmiennymi ilościowymi")
+```
+
+Na rysunku \ref{fig:rozrzuty} widać zależność między zmiennymi `tenure`, `MonthlyCharges` oraz `TotalCharges`.
+
+-   Pomiędzy zmienną `tenure` a `MonthlyCharges` istnieje mała zależność, co widać po bardzo chaotycznym wykresie rozrzutu. Sugerować to może, że nie ma tak naprawdę znaczenia, czy dany koszt miesięczny opłaca nowy czy stały klient.
+
+-   Pomiędzy zmienną `tenure` a `TotalCharges` istnieje silna, liniowa korelacja, co można odczytać z wykresu. Sugeruje to, że łączne koszty korzystania z naszych usług rosną wraz z długością stażu klienta.
+
+-   Pomiędzy zmienną `MonthlyCharges` a `TotalCharges` również istnieje korelacja, z rysunku jesteśmy w stanie odczytać, że im większe koszty miesięczne oferty, tym większe koszty całkowite.
+
+\newpage
+
+# Analiza opisowa z podziałem na grupy
+
+## Wskaźniki sumaryczne
+
+```{r podzial, echo = FALSE}
+dane.lojalni <- subset(dane, Churn == "No")
+dane.nielojalni <- subset(dane, Churn == "Yes")
+
+loj.nieloj.kol <- viridis(2, .7, .5, 1)
+```
+
+### Wskaźniki sumaryczne zmiennych ilościowych
+
+Od tej pory zaczniemy rozróżniać dwa typy klientów:
+
+-   **klientami lojalnymi** nazwiemy klientów, którzy dalej pobierają usługi naszej firmy oraz
+
+-   **klientami nielojalnymi** tych klientów, którzy zrezygnowali z naszych usług.
+
+W tabeli \ref{tab:lojalni_ilosciowe} przedstawiono wskaźniki sumaryczne zmiennych ilościowych (`tenure`, `MonthlyCharges`, `TotalCharges`) dla klientów lojalnych.
+
+```{r lojalni_ilosciowe, echo = FALSE}
+tabelka.lojalni <- sapply(dane.lojalni[, ilosciowe], my.summary)
+kable(tabelka.lojalni, format = "latex", caption = "Wskaźniki sumaryczne dla zmiennych ilościowych - klienci lojalni", digits = 4) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Zwróćmy uwagę na ujemną skośność rozkładów zmiennych `tenure` oraz `MonthlyCharges` ilościowych dla klientów lojalnych - sugerować ona będzie ich lewostronną skośność. Z kolei `TotalCharges` będzie miało skośność silnie prawostronną. Kurtoza dla wszystkich zmiennych przyjmuje ujemną wartość, zatem będzie ona bardziej spłaszczona w porównaniu z rozkładem normalnym.
+
+Teraz przeanalizujmy wskaźniki sumaryczne dla klientów nielojalnych (tabela \ref{tab:nielojalni_ilosciowe}).
+
+```{r nielojalni_ilosciowe, echo = FALSE}
+tabelka.nielojalni <- sapply(dane[, ilosciowe], my.summary)
+kable(tabelka.nielojalni, format = "latex", caption = "Wskaźniki sumaryczne dla zmiennych ilościowych - klienci nielojalni", digits = 4) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Tym razem ujemna skośność występuje wyłącznie dla zmiennej `tenure`, a zatem mamy jej lewostronną asymetrię. Zarazem `MonthlyCharges` oraz `TotalCharges` będą miały skośność prawostronną. Kurtoza dla wszystkich zmiennych dalej przyjmuje wartość ujemną, więc dalej rozkłady będą spłaszczone w stosunku do rozkładu normalnego.
+
+\newpage
+
+## Wykresy z podziałem na grupy
+
+### Wykresy zmiennych ilościowych
+
+```{r internet_uslugi.grupy, echo = FALSE, fig.width = 6, fig.cap = "\\label{fig:internet_uslugi.grupy}Histogram zmiennej tenure z podziałem na lojalność klientów"}
+par(mfrow = c(1, 1))
+rgb1 <- rgb(.7, .3, .7, .5)
+rgb2 <- rgb(1, 0, 0, .5)
+hist(
+  dane.lojalni$tenure,
+  breaks = 20,
+  main = "Czas pobierania usług",
+  xlab = "Czas (w miesiącach)",
+  ylab = "Procent klientów",
+  col = loj.nieloj.kol[1],
+  ylim = c(0, 0.081),
+  prob = TRUE
+)
+hist(
+  dane.nielojalni$tenure,
+  breaks = 20,
+  main = "Miesięczne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Procent klientów",
+  col = loj.nieloj.kol[2],
+  prob = TRUE,
+  add = TRUE
+)
+legend("topright", fill = loj.nieloj.kol, legend = c("lojalni", "nielojalni"))
+par(mfrow = c(1, 1))
+```
+
+Na wykresie \ref{fig:internet_uslugi.grupy} przedstawiono histogram zmiennej `tenure` z podziałem na grupę klientów lojalnych oraz grupę klientów nielojalnych. Na podstawie ów histogramu można zauważyć, że:
+
+-   klienci, którzy rezygnują z naszych usług najczęściej rezygnują po zaledwie kilku miesiącach, chociaż zdarzają się także tacy, którzy posiadali umowę na dłużej niż 5 lat.
+
+-   rozkład klientów, którzy dołączali w różnym czasie i dalej są naszymi klientami jest bliski jednostajnemu, więc możemy wyjąć wniosek, że jesteśmy w stanie stale pozyskiwać nowych klientów.
+
+```{r internet_uslugi.grupy2, echo = FALSE, fig.width = 6, fig.cap =  "\\label{fig:internet_uslugi.grupy2}Histogram zmiennej MonthlyCharges z podziałem na lojalność klientów"}
+par(mfrow = c(1, 1))
+rgb1 <- rgb(.7, .3, .7, .5)
+rgb2 <- rgb(1, 0, 0, .5)
+hist(
+  dane.lojalni$MonthlyCharges,
+  breaks = 20,
+  main = "Miesięczne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Procent klientów",
+  col = loj.nieloj.kol[1],
+  prob = TRUE
+)
+hist(
+  dane.nielojalni$MonthlyCharges,
+  breaks = 20,
+  main = "Miesięczne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Procent klientów",
+  col = loj.nieloj.kol[2],
+  prob = TRUE,
+  add = TRUE
+)
+legend("topright", fill = loj.nieloj.kol, legend = c("lojalni", "nielojalni"))
+par(mfrow = c(1, 1))
+```
+
+Na wykresie \ref{fig:internet_uslugi.grupy2} przedstawiono histogram zmiennej `MonthlyCharges` z podziałem na grupę klientów lojalnych oraz grupę klientów nielojalnych. Wnioskować możemy, że:
+
+-   najwięcej obecnych klientów wybiera nasze najtańsze usługi - mieszczą się w granicach $10$ - $30$ dolarów miesięcznie. Duża ich część również pobiera usługi od $50$ do $110$ dolarów.
+
+-   klienci, którzy odeszli, mieli tendencję do wybierania droższych usług. Większość klientów nielojalnych płaciło miesięcznie od ok. $60$ do $110$ dolarów miesięcznie, a usług za poniżej $40$ dolarów wybierano zdecydowanie najrzadziej.
+
+```{r internet_uslugi.grupy3, echo = FALSE, fig.width = 6, fig.cap = "\\label{fig:internet_uslugi.grupy3}Histogram zmiennej TotalCharges z podziałem na lojalność klientów"}
+par(mfrow = c(1, 1))
+
+hist(
+  dane.lojalni$TotalCharges,
+  main = "Łączne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Liczba klientów",
+  col = loj.nieloj.kol[1],
+  xlim  = c(0, 9000),
+  prob = TRUE,
+  ylim = c(0, 0.0009)
+)
+hist(
+  dane.nielojalni$TotalCharges,
+  breaks = 15,
+  main = "Łączne opłaty",
+  xlab = "Wysokość opłaty",
+  ylab = "Liczba klientów",
+  col = loj.nieloj.kol[2],
+  prob = TRUE,
+  add = TRUE
+)
+legend("topright", fill = loj.nieloj.kol, legend = c("lojalni", "nielojalni"))
+par(mfrow = c(1, 1))
+```
+
+Na wykresie \ref{fig:internet_uslugi.grupy3} przedstawiono histogram zmiennej `TotalCharges` z podziałem na grupę klientów lojalnych oraz grupę klientów nielojalnych. Z rysunku widać, że:
+
+-   zarówno dla klientów lojalnych, jak i nielojalnych, rozkład zmiennej `TotalCharges` jest skośny prawostronnie. To oznacza, że znacznie więcej obserwacji płaciło mniej, aniżeli więcej dolarów całkowitych opłat.
+
+-   opłaty dawnych klientów często oscylowały w kwotach poniżej $1000$ dolarów.
+
+```{r monthly.rozrzutu.grupy, echo = FALSE, fig.cap="\\label{fig:monthly.rozrzutu.grupy}Wykres zależności zmiennej tenure i MonthlyCharges z podziałem na grupy", fig.width = 6}
+mars <- par("mar")
+
+par("mfrow" = c(1, 2))
+
+tenure.loj <- dane.lojalni$tenure
+monthly.loj <- dane.lojalni$MonthlyCharges
+total.loj <- dane.lojalni$TotalCharges
+
+tenure.nieloj <- dane.nielojalni$tenure
+monthly.nieloj <- dane.nielojalni$MonthlyCharges
+total.nieloj <- dane.nielojalni$TotalCharges
+
+plot(tenure.loj, monthly.loj,
+     main = "Klienci lojalni",
+     col = loj.nieloj.kol[1],
+     xlab = "tenure",
+     ylab = "MonthlyCharges"
+     )
+
+lines(lowess(tenure.loj, monthly.loj), lwd = 3)
+
+plot(tenure.nieloj, monthly.nieloj,
+     main = "Klienci nielojalni",
+     col = loj.nieloj.kol[2],
+     xlab = "tenure",
+     ylab = "MonthlyCharges")
+
+lines(lowess(tenure.nieloj, monthly.nieloj), lwd = 3)
+
+par("mfrow" = c(1, 1))
+
+par("mar" = mars)
+```
+
+Z wykresu \ref{fig:monthly.rozrzutu.grupy} wynika, że zmienna `tenure` ma pewien wpływ na wybór wysokości miesięcznych opłat.
+
+-   Klienci lojalni preferują zaczynać od niższych kwot (ok. $40$ dolarów), ale z czasem decydują się płacić więcej (od $60$ do $120$ dolarów). Zdarzają się oczywiście obserwacje zaprzeczające tej regule.
+
+-   Klienci nielojalni są bardziej skłonni zaczynać od większych kwot na początek, a ich miesięczne opłaty po czasie wzrastają średnio do około nawet $100$ dolarów. Występują przypadki, które zaczynają się od niższych kwot.
+
+-   Możemy wysnuć wniosek, że, być może, klienci wybierają na start zbyt kosztowne usługi, przez co mają skłonność do rezygnacji z usług naszej firmy.
+
+```{r total.rozrzutu.grupy, echo = FALSE, fig.cap="\\label{fig:total.rozrzutu.grupy}Wykres zależności zmiennej tenure i TotalCharges z podziałem na grupy", fig.width = 6}
+mars <- par("mar")
+
+par("mfrow" = c(1, 2))
+
+
+
+plot(tenure.loj, total.loj,
+     main = "Klienci lojalni",
+     col = loj.nieloj.kol[1],
+     xlab = "tenure",
+     ylab = "TotalCharges")
+
+lines(lowess(tenure.loj[!is.na(total.loj)], total.loj[!is.na(total.loj)]), lwd = 3)
+
+plot(tenure.nieloj, total.nieloj,
+     main = "Klienci nielojalni",
+     col = loj.nieloj.kol[2],
+     xlab = "tenure",
+     ylab = "TotalCharges")
+
+lines(lowess(tenure.nieloj, total.nieloj), lwd = 3)
+
+par("mfrow" = c(1, 1))
+
+par("mar" = mars)
+```
+
+Dłuższy pobyt klienta w ramionach usług naszej firmy przyczynia się do proporcjonalnego wzrostu całkowitych opłat. Na podstawie wykresu \ref{fig:total.rozrzutu.grupy} możemy odczytać, że:
+
+-   klienci lojalni mają większy zakres łącznych opłat wraz z długością pobierania usług. Oznacza to, że pomimo powiększania zakresu branych usług przez niektórych klientów, dalej istnieją klienci, którzy podtrzymują ich niewielką ilość. Dodatkowo, mały procent stałych klientów uzyskało łączne kwoty z zakresu $2000$ - $3000$ dolarów.
+
+-   klienci nielojalni charakteryzują się głównie liniowym rozkładem łącznych opłat w zależności od czasu bycia klientem.
+
+```{r total.monthly.grupy, echo = FALSE, fig.cap="\\label{fig:total.monthly.grupy}Wykres zależności zmiennej MonthlyCharges i TotalCharges z podziałem na grupy", fig.width = 6}
+mars <- par("mar")
+
+par("mfrow" = c(1, 2))
+
+plot(monthly.loj, total.loj,
+     main = "Klienci lojalni",
+     col = loj.nieloj.kol[1],
+     xlab = "MonthlyCharges",
+     ylab = "TotalCharges")
+
+lines(lowess(monthly.loj[!is.na(total.loj)], total.loj[!is.na(total.loj)]), lwd = 3)
+
+plot(monthly.nieloj, total.nieloj,
+     main = "Klienci nielojalni",
+     col = loj.nieloj.kol[2],
+     xlab = "MonthlyCharges",
+     ylab = "TotalCharges")
+
+lines(lowess(monthly.nieloj, total.nieloj), lwd = 3)
+
+par("mfrow" = c(1, 1))
+
+par("mar" = mars)
+```
+
+Jeżeli miesięczne opłaty rosną, rosnąć również intuicyjnie powinny całkowite koszta pobierania usług, co jest początkowo zgodne z wykresami rozrzutu przedstawionymi na wykresie \ref{fig:total.monthly.grupy}.
+
+-   Należy pamiętać, że całkowite opłaty nie są wystawiane na podstawie wyłącznie opłat miesięcznych, ważną rolę gra również czas pobierania usług przez klienta. Nawet jeśli klient płaci $80$ czy $100$ dolarów miesięcznie, nie implikuje to od razu, że jego całkowite opłaty będą wysokie.
+
+-   Osoby płacące ponad $100$ dolarów miesięcznie, nie posiadają niskich opłat całkowitych, co oznacza, że takich klientów po prostu nie posiadamy w tej bazie. Być może zadowoleni klienci dobierają nowe usługi po czasie?
+
+-   Zakres wartości łącznych opłat klientów nielojalnych jest niższy od zakresu dla klientów lojalnych. Wpływa na to prawdopodobnie szybka rezygnacja z usług przed osiągnięciem wysokich całkowitych kosztów.
+
+### Wykresy zmiennych jakościowych
+
+```{r dane_slupkowe_grupy, echo =  FALSE}
+dane.slupkowe.lojalni <- sapply(jakosciowe, function(x) table(dane.lojalni[, x]))
+dane.slupkowe.nielojalni <- sapply(jakosciowe, function(x) table(dane.nielojalni[, x]))
+
+loj.nieloj.lok <- c(loj.nieloj.kol[2], loj.nieloj.kol[1])
+knitr::opts_chunk$set(fig_width = 6)
+```
+
+```{r grupy.gender.senior, echo = FALSE, fig.width = 6.5, fig.height = 4.5, fig.cap = "\\label{fig:grupy.gender.senior}Wykresy słupkowe opisujące klientów"}
+# -- GENDER --
+par("mfrow" = c(2, 2))
+mars <- par("mar")
+par("mar" = c(2.5, 4.7, 3.7, 2.5))
+
+names(dane.slupkowe.lojalni$gender) <- c("Kobiet", "Mężczyzn")
+names(dane.slupkowe.nielojalni$gender) <- c("Kobiet", "Mężczyzn")
+grupy.gender <- rbind(dane.slupkowe.lojalni$gender, dane.slupkowe.nielojalni$gender)
+
+barplot(grupy.gender, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Zmienna gender",
+        horiz = TRUE,
+        las = 1)
+
+# -- SENIOR --
+names(dane.slupkowe.lojalni$SeniorCitizen) <- c("Nie-senior", "Senior")
+names(dane.slupkowe.nielojalni$SeniorCitizen) <- c("Nie-senior", "Senior")
+grupy.senior <- rbind(dane.slupkowe.lojalni$SeniorCitizen, dane.slupkowe.nielojalni$SeniorCitizen)
+
+barplot(grupy.senior, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Klienci seniorzy",
+        horiz = TRUE,
+        las = 1)
+
+# -- PARTNER --
+
+names(dane.slupkowe.lojalni$Partner) <- c("Nie", "Tak")
+names(dane.slupkowe.nielojalni$Partner) <- c("Nie", "Tak")
+grupy.partner <- rbind(dane.slupkowe.lojalni$Partner, dane.slupkowe.nielojalni$Partner)
+
+barplot(grupy.partner, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient ma partnera?",
+        horiz = TRUE,
+        las = 1)
+
+# -- DEPENDENTS --
+
+names(dane.slupkowe.lojalni$Dependents) <- c("Nie", "Tak")
+names(dane.slupkowe.nielojalni$Dependents) <- c("Nie", "Tak")
+grupy.depen <- rbind(dane.slupkowe.lojalni$Dependents, dane.slupkowe.nielojalni$Dependents)
+
+barplot(grupy.depen, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient ma\n osoby podległe?",
+        horiz = TRUE,
+        las = 1)
+
+legend("topleft", fill = loj.nieloj.lok,
+       legend = c("nielojalni", "lojalni"), inset = c(-.32, -.45), xpd = TRUE)
+
+par("mar" = mars)
+par("mfrow" = c(1, 1))
+```
+
+Analizując wykres \ref{fig:grupy.gender.senior}, możemy bardziej poznać klientów w poszczególnych grupach.
+
+-   Zarówno wśród klientów lojalnych i klientów nielojalnych znajduje się podobna liczba kobiet do liczby mężczyzn, w większości są to osoby w młodszym wieku.
+
+-   Większość klientów lojalnych ma partnera, jednak wśród grupy klientów nielojalnych przeważają osoby bez partnera.
+
+-   Większość klientów lojalnych i klientów nielojalnych nie posiada osób podległych sobie (np. dzieci), jednak wśród klientów lojalnych takie osoby stanowią większy procent niż wśród klientów nielojalnych.
+
+```{r grupy.phone, echo = FALSE, fig.cap="\\label{fig:grupy.phone}Wykres osób, którzy pobierają usługi telefoniczne"}
+mars <- par("mar")
+par("mar" = c(5.1, 4.1, 4.1, 7.1))
+names(dane.slupkowe.lojalni$PhoneService) <- c("Nie", "Tak")
+names(dane.slupkowe.nielojalni$PhoneService) <- c("Nie", "Tak")
+grupy.phone <- rbind(dane.slupkowe.lojalni$PhoneService, dane.slupkowe.nielojalni$PhoneService)
+
+barplot(grupy.phone, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Korzysta z usług telefonicznych",
+        horiz = TRUE,
+        las = 1,
+        )
+legend("bottomright", fill = loj.nieloj.lok,
+       legend = c("nielojalni", "lojalni"), inset = c(-.3, .1), xpd = TRUE)
+par("mar" = mars)
+```
+
+Z wykresu \ref{fig:grupy.phone} wynika, że w obu grupach przeważający procent klientów korzysta z usług telefonicznych naszej firmy.
+
+```{r grupy.lines, echo = FALSE, fig.cap="\\label{fig:grupy.lines}Wykres osób z wieloma liniami telefonicznymi"}
+mars <- par("mar")
+par("mar" = c(5.1, 4.1, 4.1, 7.1))
+names(dane.slupkowe.lojalni$MultipleLines) <- c("Nie", "Nie korzysta", "Tak")
+names(dane.slupkowe.nielojalni$MultipleLines) <- c("Nie", "Nie korzysta", "Tak")
+
+grupy.lines <- rbind(dane.slupkowe.lojalni$MultipleLines[-2], dane.slupkowe.nielojalni$MultipleLines[-2])
+
+barplot(grupy.lines, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Posiada wiele linii telefonicznych",
+        horiz = TRUE,
+        las = 1)
+legend("topright", fill = loj.nieloj.lok,
+       inset = c(-.3, .12),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+par("mar" = mars)
+```
+
+Z wykresu \ref{fig:grupy.lines} możemy odczytać dane na temat liczby klientów korzystających z usługi wielu numerów telefonu.
+
+-   W grupie klientów lojalnych osób korzystających z jednej linii komórkowej jest więcej niż tych korzystających z wielu.
+
+-   W grupie klientów nielojalnych, różnica między osobami z wieloma liniami telefonicznymi a tylko z jedną linią jest bardzo mała. To oznacza, że klienci, którzy odeszli, posiadali statystycznie większe zainteresowanie tą usługą. Fakt ten może, lecz nie musi, mieć wpływ na zerwanie umowy.
+
+```{r grupy.internet, echo = FALSE, fig.cap="\\label{fig:grupy.internet}Wykres osób, które korzystają z usługi internetu"}
+mars <- par("mar")
+par("mar" = c(4.6, 6.1, 4.1, 7.1))
+names(dane.slupkowe.lojalni$InternetService) <- c("DSL", "Światłowód", "Brak")
+names(dane.slupkowe.nielojalni$InternetService) <- c("DSL", "Światłowód", "Brak")
+
+grupy.internet <- rbind(dane.slupkowe.lojalni$InternetService, dane.slupkowe.nielojalni$InternetService)
+
+barplot(grupy.internet, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta\nz usługi internetowej?",
+        horiz = TRUE,
+        las = 1)
+legend("topright", fill = loj.nieloj.lok,
+       inset = c(-.3, -.05),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+par("mar" = mars)
+```
+
+Przyglądając się wykresowi \ref{fig:grupy.internet} można zauważyć, że zdecydowana większość klientów nielojalnych korzystała z usług internetowych, zarazem wśród obecnych klientów procent osób rezygnujących z tej usługi jest niemały. Zauważmy również, iż wśród dawnych klientów na światłowód decydowano się prawie $3$ razy częściej niż na DSL (w kontraście do obecnych klientów).
+
+Podsuwać to może kilka domniemań odejścia tych klientów, takie jak problemy z dostarczaniem sygnału internetowego, szczególnie światłowodem, niewystarczająca siła pobierania i wysyłania danych.
+
+```{r grupy.uslugi.net, echo = FALSE, fig.width = 6, fig.height = 6.5, fig.cap="\\label{fig:grupy.uslugi.net}Wykres osób, które korzystają z usługi internetu"}
+par(mfrow = c(3, 2))
+
+mars <- par("mar")
+par("mar" = c(4.6, 6.1, 4.1, 7.1))
+
+# -- ONLINE_SECURITY --
+names(dane.slupkowe.lojalni$OnlineSecurity) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$OnlineSecurity) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.secur <- rbind(dane.slupkowe.lojalni$OnlineSecurity[-2], dane.slupkowe.nielojalni$OnlineSecurity[-2])
+
+barplot(grupy.uslugi.secur, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\nbezpieczeństwa w sieci?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+# -- ONLINE_BACKUP --
+names(dane.slupkowe.lojalni$OnlineBackup) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$OnlineBackup) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.back <- rbind(dane.slupkowe.lojalni$OnlineBackup[-2], dane.slupkowe.nielojalni$OnlineBackup[-2])
+
+barplot(grupy.uslugi.back, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\ninternetowej kopii zapasowej?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+# -- DEVICE_PROTECTION --
+names(dane.slupkowe.lojalni$DeviceProtection) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$DeviceProtection) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.dev <- rbind(dane.slupkowe.lojalni$DeviceProtection[-2], dane.slupkowe.nielojalni$DeviceProtection[-2])
+
+barplot(grupy.uslugi.dev, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\nochrony urządzeń?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+# -- TECH_SUPPORT --
+names(dane.slupkowe.lojalni$TechSupport) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$TechSupport) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.tech <- rbind(dane.slupkowe.lojalni$TechSupport[-2], dane.slupkowe.nielojalni$TechSupport[-2])
+
+barplot(grupy.uslugi.tech, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\nwsparcia technicznego?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+# -- STREAMING_TV --
+names(dane.slupkowe.lojalni$StreamingTV) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$StreamingTV) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.tv <- rbind(dane.slupkowe.lojalni$StreamingTV[-2], dane.slupkowe.nielojalni$StreamingTV[-2])
+
+barplot(grupy.uslugi.tv, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\nstreamingu TV?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+# -- STREAMING_MOVIES --
+names(dane.slupkowe.lojalni$StreamingMovies) <- c("Nie", "Brak internetu", "Tak")
+names(dane.slupkowe.nielojalni$StreamingMovies) <- c("Nie", "Brak internetu", "Tak")
+
+grupy.uslugi.movi <- rbind(dane.slupkowe.lojalni$StreamingMovies[-2], dane.slupkowe.nielojalni$StreamingMovies[-2])
+
+barplot(grupy.uslugi.movi, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Czy klient korzysta z usługi\nstreamingu filmów?",
+        horiz = TRUE,
+        las = 1,
+        xlim = c(0, 2000))
+legend("right", fill = loj.nieloj.lok,
+       inset = c(-.65, 0),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+
+
+par("mar" = mars)
+
+par(mfrow = c(1, 1))
+```
+
+Wykres \ref{fig:grupy.uslugi.net} przedstawia liczbę klientów korzystających (bądź nie) z danych usług internetowych.
+
+-   Obecni klienci są podzieleni w kwestii pobierania dodatkowych usług internetowych. W większości przypadków jest to równomierny podział, z takimi wyjątkami, że bezpieczeństwa w sieci oraz wsparcia technicznego odmawia ich nieznaczna większość.
+
+-   Dawni klienci byli bardziej sceptyczni do oferowanych im usług - dla każdej z nich zdecydowana większość odmawiała ich pobierania. W przypadku bezpieczeństwa w sieci, ochrony urządzeń, wsparcia technicznego i internetowej kopii zapasowej, owa grupa była raczej niechętna, zaś w kontekście streamingu TV oraz filmów rozkład wyboru był bardziej zrównoważony.
+
+```{r grupy.contract, echo = FALSE, fig.cap="\\label{fig:grupy.contract}Wykres słupkowy wyboru rodzaju umowy wśród klientów lojalnych i nielojalnych"}
+mars <- par("mar")
+par("mar" = c(4.6, 6.1, 4.1, 7.1))
+names(dane.slupkowe.lojalni$Contract) <- c("Miesięczna", "Roczna", "Dwuletnia")
+names(dane.slupkowe.nielojalni$Contract) <- c("Miesięczna", "Roczna", "Dwuletnia")
+
+grupy.contract <- rbind(dane.slupkowe.lojalni$Contract, dane.slupkowe.nielojalni$Contract)
+
+barplot(grupy.contract, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Jaką umowę podpisał klient?",
+        horiz = TRUE,
+        las = 1)
+legend("topright", fill = loj.nieloj.lok,
+       inset = c(-.3, -.05),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+par("mar" = mars)
+```
+
+Najwięcej klientów lojalnych i nielojalnych podpisuje umowę na okres miesiąca (wykres \ref{fig:grupy.contract}).
+
+-   Biorąc pod uwagę dawnych klientów, umowa dwuletnia była rzadko podpisywana. Istnieje jednak wiele obecnych klientów, którzy ją podpisali.
+
+-   Umowa roczna jest najmniej popularną umową wśród klientów lojalnych, chociaż i tak podpisujących ją jest znacząca część. Z kolei dla klientów nielojalnych nie cieszyła się ona dużym zainteresowaniem, o wiele bardziej skłonni byli podpisać umowę miesięczną.
+
+```{r grupy.paperless, echo = FALSE, fig.cap="\\label{fig:grupy.paperless}Wykres słupkowy wyboru sposobu wystawienia faktury wśród klientów lojalnych i nielojalnych"}
+mars <- par("mar")
+par("mar" = c(4.6, 6.1, 4.1, 7.1))
+names(dane.slupkowe.lojalni$PaperlessBilling) <- c("Papierowa", "Elektroniczna")
+names(dane.slupkowe.nielojalni$PaperlessBilling) <- c("Papierowa", "Elektroniczna")
+
+grupy.paperless <- rbind(dane.slupkowe.lojalni$PaperlessBilling, dane.slupkowe.nielojalni$PaperlessBilling)
+
+barplot(grupy.paperless, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Jaką fakturę wybrał klient?",
+        horiz = TRUE,
+        las = 1)
+legend("bottomright", fill = loj.nieloj.lok,
+       inset = c(-.4, .1),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+par("mar" = mars)
+```
+
+W obu grupach przeważał wybór faktury elektronicznej (wykres \ref{fig:grupy.paperless}). Klienci lojalni wybierali również formę papierową faktury, zaś klienci nielojalni raczej w mniejszości.
+
+```{r grupy.payment, echo = FALSE, fig.cap="\\label{fig:grupy.payment}Wykres słupkowy wyboru sposobu płatności wśród klientów lojalnych i nielojalnych"}
+mars <- par("mar")
+par("mar" = c(4.6, 7.5, 4.1, 7.1))
+names(dane.slupkowe.lojalni$PaymentMethod) <- c("Automatyczny\nprzelew bankowy", "Automatyczna\nkarta kredytowa", "Czek przesłany\nelektronicznie", "Czek przesłany\npocztą")
+names(dane.slupkowe.nielojalni$PaymentMethod) <- c("Automatyczny\nprzelew bankowy", "Automatyczna\nkarta kredytowa", "Czek przesłany\nelektronicznie", "Czek przesłany\npocztą")
+
+grupy.payment <- rbind(dane.slupkowe.lojalni$PaymentMethod, dane.slupkowe.nielojalni$PaymentMethod)
+
+barplot(grupy.payment, beside = TRUE,
+        col = loj.nieloj.kol,
+        main = "Jaką metodę płatności wybrał klient?",
+        horiz = TRUE,
+        las = 1)
+legend("bottomright", fill = loj.nieloj.lok,
+       inset = c(-.6, .1),
+       legend = c("nielojalni", "lojalni"), xpd = TRUE)
+par("mar" = mars)
+```
+
+Rysunek \ref{fig:grupy.payment} przedstawia preferowany wybór metody płatności wśród klientów, z podziałem na klientów obecnych i rezygnujących.
+
+-   Rozkład metod płatności wśród klientów lojalnych jest jednostajny, praktycznie tyle samo osób z tej grupy klientów korzysta z każdej metody.
+
+-   Preferowaną metodą płatności klientów, którzy zrezygnowali już z usług naszej firmy, był czek przesłany elektronicznie. Jest ona najbardziej dominującą wśród metod płatności - płaciło nią ponad $1000$ osób, gdzie z pozostałych metod przypadało na jedną od $200$ do $300$ klientów.
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(fig_width = 5)
+```
+
+\newpage
+
+# Podsumowanie
+
+## Wnioski
+
+-   Wśród klientów jest mniej więcej tyle samo kobiet, jak i mężczyzn. Większa część z nich nie jest seniorami, chociaż zdarzają się seniorzy, którzy korzystają z usług firmy. Większość klientów nie posiada partnera, a jeszcze więcej nie posiada osób sobie zależnych.
+
+-   Zdecydowana większość klientów korzysta oferty telefonicznej firmy. Zaokrąglając, połowa z nich posiada więcej niż jeden numer komórkowy.
+
+-   Duża część obecnych klientów nie korzysta z usług internetowych, ale klienci, którzy z nich korzystają, wybierają częściej DSL. Za to klienci, którzy zrezygnowali z usług firmy, wybierali częściej światłowód. Można wysunąć wniosek, że oferta światłowodowa nie spełniała wymagań klientów lub była porównywalnie gorsza od usługi w konkurencyjnych firmach.
+
+-   Spośród klientów, którzy wybrali w firmie usługę internetową, najpopularniejszą wybieraną usługą jest streaming filmów oraz streaming TV. Klienci, którzy zrezygnowali, byli raczej przeciwni dobieraniu dodatkowych usług internetowych, ale klienci, których dalej obsługujemy, są podzieleni pod względem doboru dodatków. Sugerować to może, iż dawni klienci nie byli zadowoleni z oryginalnej usługi przesyłu sygnału internetowego, dlatego też nie dobierali dodatkowych opcji. Może to również sugerować, że klienci, którzy korzystali z dodatkowych usług, byli mniej skłonni do opuszczenia firmy, gdyż one trafiały w ich zainteresowania.
+
+-   Większość klientów podpisała umowę miesięczną. Spośród obecnych klientów, rozkład wybranej umowy jest jednak bardziej jednostajny - jest wiele osób wybierających umowę na rok lub dwa lata. Z kolei wśród dawnych klientów umowy roczne i dwuletnie były rzadko podpisywane. Może to za sobą pociągnąć wniosek, iż klienci, którzy odeszli, wybierali celowo umowę miesięczną, aby przetestować działanie naszej firmy, a w skutek niezadowolenia, ją porzucali.
+
+Ogólny wniosek: Główną przyczyną odchodzenia klientów z naszej firmy może być brak zadowolenia ze świadczonych usług dostarczania internetu, oferty telefonicznej lub dodatkowych usług, w szczególności oferowanych przy umowach miesięcznych.
+
+## Propozycje dalszych działań
+
+-   Wprowadzenie nowych ofert dla klientów, które przykładowo łączą ze sobą usługi dostarczania internetu i dodatkowych streamingu, wsparcia technicznego i innych.
+
+-   Wprowadzenie ankiet wśród obecnych klientów, w szczególności tych, którzy korzystają z usług firmy od niedawna.
+
+-   Analiza działania usługi prowadzenia światłowodu, gdyż ta usługa była najczęściej wybieraną wśród rezygnujących klientów.
+
+-   Proponowanie dodatkowych usług klientom, którzy jeszcze z nich nie korzystają.
+
+-   Podjęcie się analizy rynku i wprowadzenia nowej usługi, która jest obecnie atrakcyjna wśród firm konkurencyjnych.

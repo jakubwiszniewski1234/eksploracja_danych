@@ -1,0 +1,1200 @@
+---
+title: "Metody podziału danych na grupy"
+subtitle: "Dyskretyzacja cech ciągłych, PCA oraz MDS"
+author: "Jakub Wiszniewski, album 282224"
+date: "`r Sys.Date()`, Anno Domini"
+header-includes:    
+  - \usepackage[OT4]{polski}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{graphicx}
+  - \usepackage{float}
+  - \usepackage{caption}
+  - \captionsetup{justification=centering}
+  - \renewcommand{\figurename}{Wykres}
+  - \renewcommand{\tablename}{Tabela}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE)
+knitr::opts_chunk$set(fig.pos = "H",
+                      out.extra = "",
+                      fig.align = "center")
+
+#install.packages("knitr")
+library(knitr)
+
+#install.packages("kableExtra")
+library(kableExtra)
+
+#install.packages("arules")
+library(arules)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+#install.packages("e1071")
+library(e1071)
+
+#install.packages("ggmosaic")
+library(ggmosaic)
+
+#install.packages("tidyr")
+library(tidyr)
+
+#install.packages("patchwork")
+library(patchwork)
+
+#install.packages("plot3D")
+library(plot3D)
+
+#install.packages("viridis")
+library(viridis)
+
+#install.packages("ggbiplot")
+library(ggbiplot)
+
+#install.packages("GGally")
+library(GGally)
+
+#install.packages("titanic")
+library(titanic)
+
+#install.packages("cluster")
+library(cluster)
+```
+
+\newpage
+
+# Dyskretyzacja (przedziałowanie) cech ciągłych
+
+## Przygotowanie danych i wybór cech
+
+Dokonamy dyskretyzacji cech ciągłych danych `iris` z R-pakietu `titanic`.
+
+* Zbiór danych zawiera wyniki pomiarów uzyskanych dla trzech gatunków irysów (tj. setosa, versicolor i virginica) i został udostępniony przez Ronalda Fishera w roku 1936.
+
+* Pomiary dotyczą długości oraz szerokości dwóch różnych części kwiatu– działki kielicha (ang. sepal) oraz płatka (ang. petal).
+
+W celu analizy zdolności dyskretyzacji cech danych `iris`, wybierzemy najlepszą i najgorszą cechę do separacji gatunków.
+
+<!-- nieużywane -->
+```{r slen, tab.cap = "\\label{tab:slen}Wskaźniki sumaryczne zmiennej Sepal.Length w poszczególnych grupach irysów."}
+# data(iris)
+# iris.setosa = subset(iris, Species == "setosa")
+# iris.versicolor = subset(iris, Species == "versicolor")
+# iris.virginica = subset(iris, Species == "virginica")
+# my.summary <- function(X) {
+#   X <- as.numeric(X)
+#   wynik <- c(
+#     min(X, na.rm = TRUE),
+#     quantile(X, probs = .25, na.rm = TRUE),
+#     median(X, na.rm = TRUE),
+#     quantile(X, .75, na.rm = TRUE),
+#     max(X, na.rm = TRUE),
+#     mean(X, na.rm = TRUE),
+#     var(X, na.rm = TRUE),
+#     sd(X, na.rm = TRUE),
+#     IQR(X, na.rm = TRUE),
+#     skewness(X, na.rm = TRUE),
+#     kurtosis(X, na.rm = TRUE)
+#   )
+#   names(wynik) <- c("Min",
+#                     "Q1",
+#                     "Mediana",
+#                     "Q3",
+#                     "Max",
+#                     "Średnia",
+#                     "Wariancja",
+#                     "Odch. std.",
+#                     "IQR",
+#                     "Skośność",
+#                     "Kurtoza")
+#   return(wynik)
+# }
+
+# # - WSKAŹNIKI SUMARYCZNE
+# 
+# # -- SEPAL LENGTH
+# 
+# setosa.summary <- my.summary(iris.setosa[, "Sepal.Length"])
+# versicolor.summary <- my.summary(iris.versicolor[, "Sepal.Length"])
+# virginica.summary <- my.summary(iris.virginica[, "Sepal.Length"])
+# 
+# sepal.length.summary <- cbind(setosa.summary, versicolor.summary, virginica.summary)
+# colnames(sepal.length.summary) <- c("setosa", "versicolor", "virginica")
+# 
+# # -- SEPAL WIDTH
+# 
+# setosa.summary <- my.summary(iris.setosa[, "Sepal.Width"])
+# versicolor.summary <- my.summary(iris.versicolor[, "Sepal.Width"])
+# virginica.summary <- my.summary(iris.virginica[, "Sepal.Width"])
+# 
+# sepal.width.summary <- cbind(setosa.summary, versicolor.summary, virginica.summary)
+# 
+# # -- PETAL WIDTH
+# 
+# setosa.summary <- my.summary(iris.setosa[, "Petal.Width"])
+# versicolor.summary <- my.summary(iris.versicolor[, "Petal.Width"])
+# virginica.summary <- my.summary(iris.virginica[, "Petal.Width"])
+# 
+# petal.length.summary <- cbind(setosa.summary, versicolor.summary, virginica.summary)
+# 
+# # -- PETAL WIDTH
+# 
+# setosa.summary <- my.summary(iris.setosa[, "Petal.Length"])
+# versicolor.summary <- my.summary(iris.versicolor[, "Petal.Length"])
+# virginica.summary <- my.summary(iris.virginica[, "Petal.Length"])
+# 
+# petal.width.summary <- cbind(setosa.summary, versicolor.summary, virginica.summary)
+# 
+#kable(sepal.length.summary,
+#      format = "latex") %>%
+#  kable_styling(latex_options = "HOLD_position")
+```
+<!--  --> 
+
+```{r wykresy_zmiennych_iris, fig.cap = "\\label{fig:wykresy_zmiennych_iris}Wykresy pudełkowe zmiennych iris w zależności od gatunku."}
+p1 <- ggplot(iris, aes(y = Sepal.Length, fill = Species)) + 
+  geom_boxplot() + ggtitle("Sepal.Length") + theme_minimal()
+p2 <- ggplot(iris, aes(y = Sepal.Width, fill = Species)) + 
+  geom_boxplot() + ggtitle("Sepal.Width") + theme_minimal()
+p3 <- ggplot(iris, aes(y = Petal.Length, fill = Species)) + 
+  geom_boxplot() + ggtitle("Petal.Length") + theme_minimal()
+p4 <- ggplot(iris, aes(y = Petal.Width, fill = Species)) + 
+  geom_boxplot() + ggtitle("Petal.Width") + theme_minimal()
+
+((p1 | p2) / (p3 | p4)) +
+  plot_layout(guides = "collect") +
+  theme(legend.position = 'bottom')
+```
+
+Z wykresu \ref{fig:wykresy_zmiennych_iris} możemy odczytać, że wartości zmiennych `Sepal.Length` i `Sepal.Width` są podobne we wszystkich gatunkach irysów, natomiast `Petal.Length` i `Petal.Width` przyjmują wartości inne dla każdej grupy. Na tej podstawie możemy wybrać cechę najlepszą do separacji, czyli taką, która najlepiej odróżnia swój gatunek na tle innych gatunków - `Petal.Length`. Z kolei cechę `Sepal.Width` wybierzemy jako cechę najgorszą do przedziałowania cech ciągłych.
+
+W analizie uwzględnimy kilka algorytmów dyskretyzacji cech:
+
+* metoda podziału cechy ze względu na równą częstotliwość obserwacji w każdym przedziale (*equal frequency*);
+* metoda podziału cechy ze względu na równą długość przedziału (*equal width*);
+* metoda oparta na klastrach k-średnich (*k-means clustering*);
+* metoda podziału cechy na zakresy zadane ręcznie.
+
+\newpage
+
+## Porównanie nienadzorowanych metod dyskretyzacji
+
+### Metoda equal frequency
+
+Zastosujemy metodę podziału cechy ze względu na równą częstotliwość obserwacji w każdym przedziale (metoda *equal frequency*).
+
+```{r equal.frequency, fig.width = 5, fig.height = 6, fig.cap = "\\label{fig:equal.frequency}Porównanie dyskretyzacji według najlepszej i najgorszej cechy na histogramie, wykresie punktowym i mozaikowym, metoda equal frequency."}
+##   -----------------------
+##  --- EQUAL FREQUENCY ---
+## -----------------------
+
+# Zapisujemy te cechy
+x <- iris[, "Petal.Length"]
+x.zle <- iris[, "Sepal.Width"]
+
+# Ustalamy przedziały na podstawie równych wystąpieniach
+x.disc.equal.freq <- discretize(x, breaks = 3)
+x.zle.disc.equal.freq <- discretize(x.zle, breaks = 3)
+
+## --- NAJLEPSZA CECHA ---
+
+# Rysujemy wystąpienia x oraz przedziały podziałów
+breaks.equal.frequency <- attributes(x.disc.equal.freq)$"discretized:breaks"
+
+# -- Rysowanie histogramu
+best.histogram <- ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.equal.frequency, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najlepsza cecha")
+
+# Rysujemy wystąpienia x oraz przedziały podziałów
+n <- length(iris[, "Petal.Length"])
+y.dots <- runif(n)
+
+# -- Rysowanie wykresu punktowego --
+best.scatter <- ggplot(iris, aes(x = Petal.Length, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.equal.frequency, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.equal.freq <- table(x.disc.equal.freq, iris$Species)
+
+match.good <- tab.equal.freq
+
+# Zamiana na data.frame
+tab.equal.freq.df <- data.frame(
+  przedzialy = rownames(tab.equal.freq),
+  setosa = tab.equal.freq[1:3],
+  versicolor = tab.equal.freq[4:6],
+  virginica = tab.equal.freq[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.equal.freq.df <- pivot_longer(tab.equal.freq.df, cols = c("setosa", "versicolor","virginica"),
+                                  names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+best.mosaic <- ggplot(tab.equal.freq.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank())
+
+
+# --- NAJGORSZA CECHA ---
+breaks.equal.frequency <- attributes(x.zle.disc.equal.freq)$"discretized:breaks"
+
+# -- Rysowanie histogramu
+worst.histogram <- ggplot(iris, aes(x = Sepal.Width, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.equal.frequency, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najgorsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+worst.scatter <- ggplot(iris, aes(x = Sepal.Width, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.equal.frequency, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.equal.freq <- table(x.zle.disc.equal.freq, iris$Species)
+
+match.bad <- tab.equal.freq
+
+# Zamiana na data.frame
+tab.equal.freq.df <- data.frame(
+  przedzialy = rownames(tab.equal.freq),
+  setosa = tab.equal.freq[1:3],
+  versicolor = tab.equal.freq[4:6],
+  virginica = tab.equal.freq[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.equal.freq.df <- pivot_longer(tab.equal.freq.df, cols = c("setosa", "versicolor","virginica"),
+                                  names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+worst.mosaic <- ggplot(tab.equal.freq.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()) +
+  theme(legend.position = "none")
+
+
+# --- RYSOWANIE WYKRESU EQUAL.FREQ DLA OBU CECH ---
+
+((best.histogram | worst.histogram) / (best.scatter | worst.scatter) / (best.mosaic | worst.mosaic)) +
+  plot_layout(guides = "collect") + theme(legend.position = 'bottom')
+
+```
+
+Na podstawie histogramów, wykresów punktowych i mozaikowych z wykresu \ref{fig:equal.frequency}, jesteśmy w stanie dostrzec ułożenie się gatunków do swoich przedziałów dla najlepszej cechy `Petal.Length` (z kilkoma niezgodnościami w postaci zaliczenia gatunku virginica do przedziału odpowiadającemu gatunkowi versicolor). Z kolei przy próbie dyskretyzacji za pomocą `Sepal.Width`, w każdym przedziale znajdują się wszystkie trzy gatunki irysów.
+
+Zgodność dyskretyzacji dla poszczególnych cech możemy wyznaczyć za pomocą funkcji `matchClasses` (z pakietu `e1701`).
+
+```{r match.freq}
+print("Zgodność dyskretyzacji z Petal.Length.")
+a <- matchClasses(match.good);
+print("Zgodność dyskretyzacji z Sepal.Width:")
+a <- matchClasses(match.bad);
+```
+
+Wskaźnik zgodności dyskretyzacji przyda się do porównania tej metody przedziałowania z innymi metodami.
+
+\newpage
+
+### Metoda equal width
+
+Teraz zastosujemy metodę podziału cechy ze względu na równą długość przedziału (*equal width*).
+
+```{r equal_width, fig.width = 5, fig.height = 6, fig.cap = "\\label{fig:equal_width}Porównanie dyskretyzacji według najlepszej i najgorszej cechy na histogramie, wykresie punktowym i mozaikowym, metoda equal width"}
+##   -------------------
+##  --- EQUAL WIDTH ---
+## -------------------
+
+# Dobre i złe
+x.disc.equal.width <- discretize(x, method = "interval", breaks = 3)
+x.zle.disc.equal.width <- discretize(x.zle, method = "interval", breaks = 3)
+
+
+## --- NAJLEPSZA CECHA ---
+
+breaks.equal.width <- attributes(x.disc.equal.width)$"discretized:breaks"
+
+# -- Rysowanie histogramu --
+best.histogram <-  ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.equal.width, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najlepsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+best.scatter <- ggplot(iris, aes(x = Petal.Length, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.equal.width, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.equal.width <- table(x.disc.equal.width, iris$Species)
+
+# Współczynnik zgodności
+match.good <- tab.equal.width
+
+# Zamiana na data.frame
+tab.equal.width.df <- data.frame(
+  przedzialy = rownames(tab.equal.width),
+  setosa = tab.equal.width[1:3],
+  versicolor = tab.equal.width[4:6],
+  virginica = tab.equal.width[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.equal.width.df <- pivot_longer(tab.equal.width.df, cols = c("setosa", "versicolor","virginica"),
+                                  names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+best.mosaic <- ggplot(tab.equal.width.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank())
+
+
+# --- NAJGORSZA CECHA ---
+
+breaks.equal.width <- attributes(x.zle.disc.equal.width)$"discretized:breaks"
+
+# -- Rysowanie histogramu
+worst.histogram <- ggplot(iris, aes(x = Sepal.Width, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.equal.width, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najgorsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+worst.scatter <- ggplot(iris, aes(x = Sepal.Width, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.equal.width, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.equal.width <- table(x.zle.disc.equal.width, iris$Species)
+
+match.bad <- tab.equal.width
+
+# Zamiana na data.frame
+tab.equal.width.df <- data.frame(
+  przedzialy = rownames(tab.equal.width),
+  setosa = tab.equal.width[1:3],
+  versicolor = tab.equal.width[4:6],
+  virginica = tab.equal.width[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.equal.width.df <- pivot_longer(tab.equal.width.df, cols = c("setosa", "versicolor","virginica"),
+                                  names_to = "species", values_to = "count")
+# Rysowanie wykresu mozaicznego
+worst.mosaic <- ggplot(tab.equal.width.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()) +
+  theme(legend.position = "none")
+
+# --- RYSOWANIE WYKRESU EQUAL.WIDTH DLA OBU CECH ---
+
+((best.histogram | worst.histogram) / (best.scatter | worst.scatter) / (best.mosaic | worst.mosaic)) +
+  plot_layout(guides = "collect") + theme(legend.position = 'bottom')
+```
+
+Na podstawie histogramów, wykresów punktowych i mozaikowych z wykresu \ref{fig:equal_width}, ponownie jesteśmy w stanie dostrzec ułożenie się gatunków do swoich przedziałów dla `Petal.Length` (z pojedynczymi wyjątkami). Przy próbie dyskretyzacji za pomocą `Sepal.Width`, w każdym przedziale znajdują się wszystkie trzy gatunki irysów.
+
+Zmierzmy zgodność metody równych przedziałów.
+
+```{r match.width}
+print("Zgodność dyskretyzacji z Petal.Length.")
+a <- matchClasses(match.good);
+print("Zgodność dyskretyzacji z Sepal.Width:")
+a <- matchClasses(match.bad);
+```
+
+\newpage
+
+### Metoda k-means clustering
+
+Teraz wykorzystajmy metodę klastrów k-średnich do wyodrębnienia dyskretyzujących przedziałów.
+
+```{r equal.k.means, fig.width = 5, fig.height = 6, fig.cap = "\\label{fig:equal.k.means}Porównanie dyskretyzacji według najlepszej i najgorszej cechy na histogramie, wykresie punktowym i mozaikowym, metoda equal k-średnich (k-means)."}
+##   -----------------
+##  --- K - MEANS ---
+## -----------------
+
+# Wyznaczamy przedzialy
+x.disc.k.means <- discretize(x, method = "cluster", breaks = 3)
+x.zle.disc.k.means <- discretize(x.zle, method = "cluster", breaks = 3)
+
+
+## --- NAJLEPSZA CECHA ---
+
+breaks.k.means <- attributes(x.disc.equal.freq)$"discretized:breaks"
+
+# -- Rysowanie histogramu --
+best.histogram <- ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.k.means, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najlepsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+
+best.scatter <- ggplot(iris, aes(x = Petal.Length, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.k.means, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.k.means <- table(x.disc.k.means, iris$Species)
+
+# Współczynnik zgodności
+match.good <- tab.k.means
+
+# Zamiana na data.frame
+tab.k.means.df <- data.frame(
+  przedzialy = rownames(tab.k.means),
+  setosa = tab.k.means[1:3],
+  versicolor = tab.k.means[4:6],
+  virginica = tab.k.means[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.k.means.df <- pivot_longer(tab.k.means.df, 
+                               cols = c("setosa", "versicolor","virginica"),
+                               names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+best.mosaic <- ggplot(tab.k.means.df) +
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank())
+
+
+# --- NAJGORSZA CECHA ---
+
+breaks.k.means <- attributes(x.zle.disc.k.means)$"discretized:breaks"
+
+# -- Rysowanie histogramu --
+worst.histogram <- ggplot(iris, aes(x = Sepal.Width, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.k.means, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najgorsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+# -- Rysowanie wykresu punktowego --
+worst.scatter <- ggplot(iris, aes(x = Sepal.Width, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.k.means, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.k.means <- table(x.zle.disc.k.means, iris$Species)
+
+match.bad <- tab.k.means
+
+# Zamiana na data.frame
+tab.k.means.df <- data.frame(
+  przedzialy = rownames(tab.k.means),
+  setosa = tab.k.means[1:3],
+  versicolor = tab.k.means[4:6],
+  virginica = tab.k.means[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.k.means.df <- pivot_longer(tab.k.means.df, 
+                               cols = c("setosa", "versicolor","virginica"),
+                               names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+worst.mosaic <- ggplot(tab.k.means.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()) +
+  theme(legend.position = "none")
+
+
+# --- RYSOWANIE WYKRESU EQUAL.WIDTH DLA OBU CECH ---
+
+((best.histogram | worst.histogram) / (best.scatter | worst.scatter) / (best.mosaic | worst.mosaic)) +
+  plot_layout(guides = "collect") + theme(legend.position = 'bottom')
+```
+
+Na podstawie histogramów, wykresów punktowych i mozaikowych z wykresu \ref{fig:equal.k.means}, zauważamy ułożenie się gatunków do swoich przedziałów dla cechy `Petal.Length` (ponownie, prawie zawsze), natomiast podczas dyskretyzacji za pomocą `Sepal.Width`, w każdym przedziale znajdują się po każdym z trzech gatunków.
+
+Wyliczamy zgodność metody *k-means clustering*.
+
+```{r match.means}
+print("Zgodność dyskretyzacji z Petal.Length.")
+a <- matchClasses(match.good);
+print("Zgodność dyskretyzacji z Sepal.Width:")
+a <- matchClasses(match.bad);
+```
+
+\newpage
+
+### Metoda własnych przedziałów
+
+Zamiast korzystać z algorytmów szukania krańców przedziałów do separacji zmiennych, możemy sami zadać ów krańce. Na podstawie wykresu \ref{fig:wykresy_zmiennych_iris} zadajmy przedziały:
+
+* dla zmiennej `Petal.Length`: $(-\infty, 2), [2, 5), [5, +\infty)$
+* dla zmiennej `Sepal.Width`: $(-\infty, 3), [3, 3.4), [3.4, +\infty)$
+
+Przedziały z powyższego przyporządkowania, reprezentujące długość lub szerokość poszczególnej części kwiatów, będziemy nazywać odpowiednio małym, średnim i dużym.
+
+```{r equal.wlasne, fig.width = 5, fig.height = 6, fig.cap = "\\label{fig:equal.wlasne}Porównanie dyskretyzacji według najlepszej i najgorszej cechy na histogramie, wykresie punktowym i mozaikowym, metoda dobierania własnych przedziałów."}
+# Wyznaczamy przedzialy
+breaks.wlasne <- c(-Inf, 2, 5, Inf)
+x.disc.wlasne <- discretize(x, method = "fixed", 
+                            breaks = breaks.wlasne,
+                            labels = c("male", "srednie", "duze"),
+                            ordered_result = TRUE)
+
+
+## --- NAJLEPSZA CECHA ---
+
+# -- Rysowanie histogramu --
+best.histogram <- ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.wlasne, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najlepsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+best.scatter <- ggplot(iris, aes(x = Petal.Length, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.wlasne, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.wlasne <- table(x.disc.wlasne, iris$Species)
+
+# Współczynnik zgodności
+match.good <- tab.wlasne
+
+# Zamiana na data.frame
+tab.wlasne.df <- data.frame(
+  przedzialy = ordered(rownames(tab.wlasne), levels = c("male", "srednie", "duze")),
+  setosa = tab.wlasne[1:3],
+  versicolor = tab.wlasne[4:6],
+  virginica = tab.wlasne[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.wlasne.df <- pivot_longer(tab.wlasne.df, 
+                               cols = c("setosa", "versicolor","virginica"),
+                               names_to = "species", values_to = "count")
+# -- Rysowanie wykresu mozaicznego --
+best.mosaic <- ggplot(tab.wlasne.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank())
+
+
+# --- NAJGORSZA CECHA ---
+
+breaks.wlasne <- c(-Inf, 3, 3.4, Inf)
+x.zle.disc.wlasne <- discretize(x.zle, method = "fixed", 
+                              breaks = breaks.wlasne,
+                              labels = c("male", "srednie", "duze"),
+                              ordered_result = TRUE)
+
+# -- Rysowanie histogramu
+worst.histogram <- ggplot(iris, aes(x = Sepal.Width, fill = Species)) +
+  geom_histogram() +
+  geom_vline(xintercept = breaks.wlasne, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none") + 
+  ggtitle("Najgorsza cecha")
+
+# -- Rysowanie wykresu punktowego --
+worst.scatter <- ggplot(iris, aes(x = Sepal.Width, y = y.dots, colour = Species)) +
+  geom_point() +
+  geom_vline(xintercept = breaks.wlasne, color = "red2", linewidth = 1.1, alpha = .8) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Tabelka z frekwencjami
+tab.wlasne <- table(x.zle.disc.wlasne, iris$Species)
+
+match.bad <- tab.wlasne
+
+# Zamiana na data.frame
+tab.wlasne.df <- data.frame(
+  przedzialy = ordered(rownames(tab.wlasne), levels = c("male", "srednie", "duze")),
+  setosa = tab.wlasne[1:3],
+  versicolor = tab.wlasne[4:6],
+  virginica = tab.wlasne[7:9]
+)
+
+# Zamiana na typ dłuższy (do wykresu mozaicznego)
+tab.wlasne.df <- pivot_longer(tab.wlasne.df, 
+                               cols = c("setosa", "versicolor","virginica"),
+                               names_to = "species", values_to = "count")
+
+# -- Rysowanie wykresu mozaicznego --
+worst.mosaic <- ggplot(tab.wlasne.df) + 
+  geom_mosaic(aes(
+    weight = count, 
+    x = product(species, przedzialy), 
+    fill = species)) +
+  labs(
+    x = "Przedziały", 
+    y = "Pokrycie", 
+    fill = "Gatunki") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank()) +
+  theme(legend.position = "none")
+
+
+# --- RYSOWANIE WYKRESU EQUAL.WIDTH DLA OBU CECH ---
+
+((best.histogram | worst.histogram) / (best.scatter | worst.scatter) / (best.mosaic | worst.mosaic)) +
+  plot_layout(guides = "collect") + theme(legend.position = 'bottom')
+```
+
+Na podstawie histogramów, wykresów punktowych i mozaikowych z wykresu \ref{fig:equal.wlasne}, zauważamy ułożenie się gatunków do zadanych przedziałów dla cechy `Petal.Length` (prawie zawsze). Podczas dyskretyzacji za pomocą `Sepal.Width`, w każdym przedziale znajdują się po każdym z trzech gatunków. 
+
+Warto zaznaczyć, iż skuteczność pokrycia gatunków w poszczególnych przedziałach jest zależna od zadanych przez użytkownika krańców przedziałów.
+
+```{r match.wlasne}
+print("Zgodność dyskretyzacji z Petal.Length.")
+a <- matchClasses(match.good);
+print("Zgodność dyskretyzacji z Sepal.Width:")
+a <- matchClasses(match.bad);
+```
+
+### Która metoda jest najlepsza?
+
+Zacznijmy od tego, że wyniki dla najgorszej cechy pokazują, iż dyskretyzacja "najgorszą cechą" (tj. `Sepal.Width`) jest złym pomysłem - wszystkie gatunki wpadają do każdego z przedziałów, nieważne jaką metodę zastosujemy. Porównajmy współczynniki zgodności obu cech.
+
+```{r tab.zgodnosci, tab.cap = "\\label{tab:tab.zgodnosci} Porównanie współczynników zgodności przedziałowania każdej z metod dla\nPetal.Length i Sepal.Width"}
+dobre <- c(95.33, 94.67, 89.33, 94.67)
+zle <- c(55.33, 50.67, 56.00, 59.33)
+
+tabl <- cbind(dobre, zle)
+rownames(tabl) <- c("equal frequency", "equal width", "k-means clustering", "własne")
+kable(tabl, 
+      format = "latex",
+      col.names = c("Petal.Length", "Sepal.Width")) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Dla zmiennej `Petal.Length`, dyskretyzacja przebiega najbardziej pomyślnie, tak naprawdę w każdej metodzie. Porównując współczynniki zgodności (tabela \ref{tab:tab.zgodnosci}), najlepszą metodą dyskretyzacji zmiennej `Petal.Length` jest metoda *equal frequency*, a najgorszą *k-means clustering*.
+
+\newpage
+
+
+# Analiza składowych głównych (PCA)
+
+## Przygotowanie danych
+City Quality of Life Dataset (plik `uaScoresDataFrame.csv`, źródło: [Kaggle](https://www.kaggle.com/datasets/orhankaramancode/city-quality-of-life-dataset).
+
+* Zbiór danych zawiera wskaźniki opisujące jakość życia w wybranych miastach, w tym m.in. takie charakterystyki jak: warunki mieszkaniowe, koszty utrzymania, bezpieczeństwo, opieka zdrowotna, edukacja itp.
+* Wszystkie cechy ilościowe przyjmują wartości w zakresie 0-10 (większa wartość oznacza lepszy wynik).
+* Dodatkowo mamy informację nt. lokalizacji danego miasta (zmienne UA_Continent i UA_Country).
+
+Dane z załadowanego pliku w dalszej części dokumentu będą nosiły nazwę "Zbior danych jakości życia".
+
+```{r zaladowanie_danych, fig.width = 6, fig.height = 5, fig.cap = "\\label{fig:zaladowanie_danych}Wykresy pudełkowe wartości cech reprezentujących ocenę jakości życia w miastach."}
+dane <- read.csv(file = "uaScoresDataFrame.csv",
+                 stringsAsFactors = TRUE)
+#str(dane)
+
+dane.rownames <- paste0(dane$UA_Name, ",", dane$UA_Country)
+
+#sum(is.na(dane)) # brak elementów brakujących
+
+# Wyznaczenie danych ilościowych
+dane.subset <- subset(dane, select = Housing:Outdoors)
+rownames(dane.subset) <- dane.rownames
+
+dane.dlugie <- pivot_longer(dane.subset, cols = everything(), names_to = "Cecha", values_to = "Wartość")
+
+ggplot(dane.dlugie, aes(x = Cecha, y = Wartość, fill = Cecha)) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+    legend.margin = margin(65, 0, 0, 0),
+    legend.position = "none") + 
+  labs(x = element_blank())
+```
+
+Wykresy pudełkowe (wykres \ref{fig:zaladowanie_danych}) pokazują zróżnicowaną wariancję każdej ze zmiennych danych jakości życia. Oznacza to, że przy analizowaniu składowych głównych PCA, konieczne jest wcześniejsza standaryzacja danych przed zastosowaniem algorytmu.
+
+```{r standaryzacja.boxplot, fig.width = 6, fig.height = 5, fig.cap = "\\label{fig:standaryzacja.boxplot}Wykresy pudełkowe ustandaryzowanych wartości cech reprezentujących ocenę jakości życia w miastach."}
+dane.subset <- as.data.frame(scale(dane.subset))
+dane.dlugie <- pivot_longer(dane.subset, cols = everything(), names_to = "Cecha", values_to = "Wartość")
+
+ggplot(dane.dlugie, aes(x = Cecha, y = Wartość, fill = Cecha)) +
+  geom_boxplot() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+    legend.margin = margin(65, 0, 0, 0),
+    legend.position = "none") + 
+  labs(x = element_blank())
+```
+
+Zastosowanie standaryzacji umożliwia poprawne wykonanie algorytmu PCA dla cech danych jakości życia.
+
+\newpage
+
+## Wyznaczenie składowych głównych i ich zmienności
+
+Wyznaczymy składowe główne PCA dla danych jakości życia.
+
+```{r skladowe.wykresy, fig.cap = "\\label{fig:skladowe.wykresy}Wykresy pudełkowe przedstawiające kolejne składowe główne (PCA)", fig.width = 5.5}
+dane.pca <- prcomp(dane.subset)
+
+dane.pca.dlugie <- as.data.frame(dane.pca$x) %>%
+  pivot_longer(
+    cols = starts_with("PC"),
+    names_to = "PC",
+    values_to = "value"
+  ) 
+
+dane.pca.dlugie$PC <- ordered(dane.pca.dlugie$PC, levels = paste0("PC", 1:17))
+
+ggplot(dane.pca.dlugie, aes(x = PC, y = value, fill = rep(1:17, length.out = nrow(dane.pca.dlugie)))) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90),
+    legend.position = "none"
+  ) + 
+  geom_boxplot() +
+  ggtitle("Wykresy pudełkowe składowych głównych") +
+  labs(x = "Składowe PCA",
+       y = "Wartości")
+```
+
+Na podstawie wykresu \ref{fig:skladowe.wykresy} widzimy efekt działania algorytmu wyznaczania zmiennych składowych. Każda kolejna cecha PC$X$, ($X = 1,\dots, 17$) posiada coraz mniejszą wariancję, co oznacza, że jesteśmy w stanie pogrupować obserwacje do skupisk za pomocą kilku pierwszych zmiennych (zamiast wszystkich siedemnastu), oczywiście przyjmując pewną tolerancję błędu.
+
+```{r skumulowane.wariancje, fig.cap = "\\label{fig:skumulowane.wariancje}Wykresy słupkowe przedstawiające skumulowane wariancje kolejnych składowych głównych (PCA)."}
+wariancje <- 100*(dane.pca$sdev^2)/sum(dane.pca$sdev^2)
+skumulowane.wariancje <- cumsum(wariancje)
+ramka <- as.data.frame(cbind(skumulowane.wariancje), paste0("PC",1:length(skumulowane.wariancje)))
+ggplot(ramka, aes(x = reorder(rownames(ramka), skumulowane.wariancje), 
+                  y = skumulowane.wariancje)) + 
+  geom_bar(stat = "identity", mapping = aes(fill = 1:17)) +
+  geom_abline(intercept = 80, 
+              slope = 0, 
+              color = "green1", 
+              linewidth = 1.3,
+              alpha = .7) + 
+  geom_abline(intercept = 90, 
+              slope = 0, 
+              color = "red2",
+              alpha = .7,
+              linewidth = 1.3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position = "none") +
+  labs(x = "Składowe",
+       y = "Skumulowane wariancje",
+       title = "Skumulowane wariancje PCA")
+```
+
+Na wykresie \ref{fig:skumulowane.wariancje} przedstawione są skumulowane wariancje kolejnych zmiennych składowych PC$X$. Można zauważyć, iż do pierwszych ośmiu składowych zachowujemy około 80% zmienności danych, a przy pierwszych dziesięciu - już około 90%.
+
+Wykorzystamy teraz pierwsze dwie wyznaczone składowe do przedstawienia danych jakości życia.
+
+```{r pca, fig.width = 7, fig.height = 5.8, fig.cap = "\\label{fig:pca}Wykres rozrzutu obserwacji ze względu na dwie pierwsze składowe główne (PCA)."}
+ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = UA_Name)) +
+  geom_point(size = 2) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Rozrzut obserwacji względem dwóch pierwszych zmiennych składowych")
+```
+
+Każda obserwacja reprezentuje miasto należące do kraju wyróżnionego kontynentu. Można dostrzec skupiska miast krajów Europy, Ameryki Północnej, Oceanii na północno-zachodnim fragmencie wykresu \ref{fig:pca}, natomiast obserwowane miasta Ameryki Południowej oraz Afryki na wschodniej części wykresu. Interpretować to można jako porównanie ów miast względem innych miast - na podstawie danych jakości życia w ów miastach. To oznacza, że porównanie jakości życia w przeciętnym mieście europejskim będzie porównywalne do jakości życia w mieście północnej Ameryki lub Oceanii.
+
+```{r pca1, fig.width = 6, fig.height = 7.5, fig.cap = "\\label{fig:pca1}Wykresy rozrzutu obserwacji ze względu na dwie pierwsze składowe główne (PCA), pogrupowane względem kontynentów."}
+alphas1 <- rep(.25, length.out = nrow(dane))
+afrykas <- which(dane$UA_Continent == "Africa")
+alphas1[afrykas] <- 1
+labels1 <- rep("", length.out = nrow(dane))
+labels1[afrykas] <- as.character(dane[afrykas, "UA_Name"])
+
+p1a <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels1, alpha = alphas1)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Afryka") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+alphas2 <- rep(.25, length.out = nrow(dane))
+asias <- which(dane$UA_Continent == "Asia")
+alphas2[asias] <- 1
+labels2 <- rep("", length.out = nrow(dane))
+labels2[asias] <- as.character(dane[afrykas, "UA_Name"])
+
+p1b <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels2, alpha = alphas2)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Azja") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+alphas3 <- rep(.25, length.out = nrow(dane))
+europes <- which(dane$UA_Continent == "Europe")
+alphas3[europes] <- 1
+labels3 <- rep("", length.out = nrow(dane))
+labels3[europes] <- as.character(dane[europes, "UA_Name"])
+
+p2a <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels3, alpha = alphas3)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Europa") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+alphas4 <- rep(.25, length.out = nrow(dane))
+namericas <- which(dane$UA_Continent == "North America")
+alphas4[namericas] <- 1
+labels4 <- rep("", length.out = nrow(dane))
+labels4[namericas] <- as.character(dane[namericas, "UA_Name"])
+
+p2b <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels4, alpha = alphas4)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Ameryka Płn.") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+alphas5 <- rep(.25, length.out = nrow(dane))
+oceanias <- which(dane$UA_Continent == "Oceania")
+alphas5[oceanias] <- 1
+labels5 <- rep("", length.out = nrow(dane))
+labels5[oceanias] <- as.character(dane[oceanias, "UA_Name"])
+
+p3a <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels5, alpha = alphas5)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Oceania") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+alphas6 <- rep(.25, length.out = nrow(dane))
+samericas <- which(dane$UA_Continent == "South America")
+alphas6[samericas] <- 1
+labels6 <- rep("", length.out = nrow(dane))
+labels6[samericas] <- as.character(dane[samericas, "UA_Name"])
+
+p3b <- ggplot(dane, aes(x = dane.pca$x[, 1], y = dane.pca$x[, 2], color = UA_Continent, label = labels6, alpha = alphas6)) +
+  geom_point(size = 1) +
+  theme_minimal() +
+  labs(x = "PC1", y = "PC2", title = "Ameryka Płd.") + 
+  theme(legend.position = "none") + 
+  geom_text(size = 2, vjust = 1)
+
+((p1a | p1b) / (p2a | p2b) / (p3a | p3b))
+```
+
+Zwróćmy uwagę na wykres \ref{fig:pca1}, który przedstawia podobieństwo miast na każdym z kontynentów osobno. W Afryce, jesteśmy w stanie zauważyć podobieństwo jakości życia jednego miasta do innych, gdyż każda obserwacja leży blisko siebie. Zatem możemy zinterpretować wykres tak, iż wniosek, że jakość życia w Nairobi oraz w Kairze jest podobna, zaś Cape Town oferuje trochę bardziej zróżnicowane warunki życia.
+
+Analogiczna sytuacja ma się na kontynentach Ameryki Południowej oraz Oceanii. W pierwszym przypadku miasta Rio de Janeiro i Sao Paulo oferują podobną jakość życia (co reprezentuje ich niedalekie położenie na wykresie), jednak nie jest im daleko do miast takich jak Buenos Aires, Caracas, leżących dalej na północ w tej wizualizacji. W Oceanii zaś Sydney oraz Melbourne mają podobne warunki życia, ale porównując te miasta do Wellington lub Christchurch, jakość życia nieco się różni. Dalej jest to jednak zachodnia część wykresu rozrzutu.
+
+Analizując wykresy rozrzutu miast europejskich, północnoamerykańskich oraz azjatyckich, dostrzec można zdecydowaną różnorodność miast. Większość miast Europy co prawda znajduje się w północno-zachodniej części wykresu, jednak jest wiele miast leżących z dala od tego skupiska. Przykładem mogą być miasta Londyn, Paryż czy Berlin, czyli stolice państw europejskich, które znajdują się w południowo-zachodnim fragmencie wykresu rozrzutu, z kolei po stronie północno-wschodniej leży między innymi Andora, Sarajewo oraz Gibraltar, co pokazuje, że jakość życia w tych dwóch grupach miast znacząco się różni.
+
+Analogiczny przypadek jest możliwy do zaobserwowania w Ameryce Północnej, skupiska miast złożone z między innymi Nowego Yorku, San Francisco i Waszyngtonu są w południowo-zachodniej części wykresu rozrzutu, zaś grupa miast złożona z Havany, Salvador czy San Jose jest położona na północnym wschodzie. W tym przypadku możliwa jest do wysunięcia teza, iż jakość miasta Stanów Zjednoczonych jest znacząco inna niż w krajach położonych nad Morzem Karaibskim.
+
+W Azji takie kryterium jest chociażby spełnione dla Nairobi, które jest mocno wyróżniającym się elementem odstającym, jest ono daleko od któregokolwiek z punktów reprezentujących miasta azjatyckie.
+
+Należy jednak pamiętać, że analizowane wykresy są jedynie wykresami rozrzutu dwóch pierwszych zmiennych składowych PC. Aby dokładnie odzwierciedlić podobieństwa w zbiorze danych jakości życia, potrzebna byłaby analiza z użyciem większej liczby punktów składowych. Niemniej jednak dzięki dwóm pierwszym składowym, możemy sprawdzić, w jakie grupy zaczynają układać się obserwacje, co pomaga nam bardziej badany zbiór danych zrozumieć.
+
+Przeanalizujmy analizę opartą na składowych głównych PC zbioru danych, wykorzystując dwuwykres (ang. *biplot*).
+
+```{r biplot, fig.width = 8, fig.height = 7.4, fig.cap = "\\label{fig:biplot} Dwuwykres przedstawiający dane jakości życia w miastach, położonych według różnych kryteriów."}
+p <- ggbiplot(dane.pca, 
+         c(1, 2),
+         groups = dane$UA_Continent,
+         scale = 1.1,
+         alpha = .8,
+         varname.size = 3,
+         varname.color = "black",
+         var.factor = 1.4,
+         var.scale = .7)
+
+seg <- which(sapply(p$layers, function(x) class(x$geom)[1] == 'GeomSegment'))
+txt <- which(sapply(p$layers, function(x) class(x$geom)[1] == 'GeomText'))
+
+p$layers[[txt]] <- geom_label(aes(x = xvar, y = yvar, label = varname,
+                                  angle = angle, hjust = hjust), 
+                              label.size = NA,
+                              size = 3,
+                              data = p$layers[[txt]]$data, 
+                              fill = '#ddddddaa')
+
+p$layers[[seg]]$aes_params$alpha <- .3
+p$layers[[seg]]$aes_params$size <- 1
+
+ktore <- which(p$data$xvar^2 + p$data$yvar^2 > 2.5)
+labels <- rep("", 266)
+
+labels[ktore] <- as.character((dane[ktore, "UA_Name"]))
+
+p + geom_text(aes(label = labels, color = dane$UA_Continent, vjust = -1), size = 2.2) + xlim(-2.2, 2.2) + ylim(-2, 2) + theme_minimal() + labs(title = "Dwuwykres rozrzutu ")
+```
+
+Wykres \ref{fig:biplot} przedstawia rozrzut danych jakości życia, rozłożonych względem zmiennych składowych PC1 oraz PC2. Odczytując go spodziewać się można, że miasta położone po stronie zwrotu poszczególnych strzałek posiadają wysoką ocenę w kryterium reprezentowanym przez tę strzałkę. Przykładowo, zwróćmy uwagę na cechy `Housing` i `Cost.of.Living`. Ich wektory zwrócone są w tym samym kierunku i tak naprawdę leżą niedaleko siebie, co może sugerować korelację między tymi dwoma zmiennymi. Miasta leżące blisko zwrotów tych strzałek mają zatem największą ocenę mieszkań oraz kosztów życia (np. Casablanca, San Juan, Caracas). 
+
+Obie strzałki zwrócone są w przeciwną stronę do `Internet.Access` oraz `Economy`, które wskazują na takie miasta jak Monachium czy Singapur, co oznacza korelację ujemną.
+
+```{r korelacja,  message = TRUE, fig.height = 4.6, fig.cap = "\\label{fig:korelacja}Korelacja między zmiennymi danych jakości życia w miastach."}
+macierz.korelacji <- cor(dane[, 5:21])
+
+ggcorr(dane[, 5:21],
+       size = 2,
+       angle = 2) +
+  theme(legend.position = "bottom",) +
+  labs(title = "Korelacja między zmiennymi jakości życia")
+```
+
+Na podstawie wykresu \ref{fig:korelacja} teza się potwierdza. Korelacja między zmiennymi `Housing` i `Cost.of.Living` wynosi `r macierz.korelacji["Housing", "Cost.of.Living"]`, a więc są one silnie powiązane. Z kolei te zmienne w porównaniu do `Internet.Access` i `Economy` mają korelację ujemną.
+
+\newpage
+
+# Skalowanie wielowymiarowe (MDS)
+
+## Przygotowanie danych
+
+Zajmiemy się teraz wyznaczeniem wskaźników odmienności oraz pogrupowaniem danych `titanic_train` (z R-pakietu `titanic`) względem kilku zmiennych grupujących.
+
+Zbiór danych zawiera wybrane charakterystyki opisujące pasażerów Titanica (w tym m.in. takie zmienne jak: wiek, płeć, miejsce rozpoczęcia podróży czy klasa pasażerska) wraz z informacją czy dana osoba przeżyła katastrofę (zmienna `Survived`). Tabela \ref{tab:dane.titanic} zawiera krótki opis każdej z kolumn.
+
+```{r dane.titanic, tab.cap = "\\label{tab:dane.titanic} Opis kolumn danych titanic\\_train"}
+titanic.subset <- subset(titanic_train, 
+                         select = c("Survived", "Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"))
+
+
+for(x in c("Survived", "Pclass", "Sex", "Embarked")){
+  titanic.subset[, x] <- as.factor(titanic.subset[, x])
+}
+
+kolumny = c(
+  "PassengerId", "Survived", "Pclass", "Name", "Sex", "Age",
+  "SibSp", "Parch", "Ticket", "Fare", "Cabin", "Embarked")
+  
+opisy = c(
+    "Identyfikator pasażera",
+    "Czy pasażer przeżył (0 = nie, 1 = tak)",
+    "Klasa biletu (1 = pierwsza, 2 = druga, 3 = trzecia)",
+    "Imię i nazwisko pasażera",
+    "Płeć pasażera",
+    "Wiek pasażera",
+    "Liczba rodzeństwa/małżonków na pokładzie",
+    "Liczba rodziców/dzieci na pokładzie",
+    "Numer biletu",
+    "Cena biletu",
+    "Numer kabiny (często brak danych)",
+    "Port zaokrętowania (C = Cherbourg, Q = Queenstown, S = Southampton)"
+  )
+
+tabela.opisowa <- cbind(kolumny, opisy)
+
+kable(tabela.opisowa, 
+      format = "latex",
+      col.names = c("Kolumny", "Opis")) %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Cechy `PassengerId`, `Name`, `Cabin` oraz `Ticket` są zmiennymi wyróżniającymi pasażerów w sposób unikatowy, zatem nie będą miały wpływu na tworzenie grup, pomijamy je w naszej analizie.
+
+\newpage
+
+## Redukcja wymiaru na bazie MDS i wizualizacja danych
+
+Do redukcji wymiaru na bazie MDS, potrzebne jest wyznaczenie macierzy odmienności przygotowanych danych. Następnie stosując skalowanie niemetryczne, jesteśmy w stanie zredukować wymiary danych. Użyjemy w tym celu metody (`cmdscale`). W celu wyznaczenia liczby wymiarów, dzięki którym najlepiej będzie można odwzorować grupy obserwacji, wyznaczymy diagramy Sheparda dla wymiarów $k = 2,\dots, 5$.
+
+```{r shepard, fig.cap = "\\label{fig:shepard}Diagramy sheparda dla dwóch, trzech, czterech i pięciu wymiarów."}
+titanic.bez.survived <- subset(titanic.subset, select = -Survived)
+
+dystanse <- as.matrix(daisy(titanic.bez.survived), stand = TRUE)
+
+mds <- cmdscale(dystanse, k = 2)
+dystanse2 <- as.matrix(dist(mds, method="euclidean"))
+p1 <- ggplot(mapping = aes(x = dystanse, y = dystanse2, color = "red", alpha = .5)) + geom_point() + ggtitle(paste("Diagram Sheparda, k =", 2)) + theme_bw() + theme(legend.position = "none")
+STRESS1 <- sum((dystanse - dystanse2)^2)
+
+mds <- cmdscale(dystanse, k = 3)
+dystanse2 <- as.matrix(dist(mds, method="euclidean"))
+p2 <- ggplot(mapping = aes(x = dystanse, y = dystanse2, color = "red2", alpha = .5)) + geom_point() + ggtitle(paste("Diagram Sheparda, k =", 3)) + theme_bw() + theme(legend.position = "none")
+STRESS2 <- sum((dystanse - dystanse2)^2)
+
+mds.dobre <- mds
+
+mds <- cmdscale(dystanse, k = 4)
+dystanse2 <- as.matrix(dist(mds, method="euclidean"))
+p3 <- ggplot(mapping = aes(x = dystanse, y = dystanse2, color = "red3", alpha = .5)) + geom_point() + ggtitle(paste("Diagram Sheparda, k =", 4)) + theme_bw() + theme(legend.position = "none")
+STRESS3 <- sum((dystanse - dystanse2)^2)
+
+mds <- cmdscale(dystanse, k = 5)
+dystanse2 <- as.matrix(dist(mds, method="euclidean"))
+p4 <- ggplot(mapping = aes(x = dystanse, y = dystanse2, color = "red4", alpha = .5)) + geom_point() + ggtitle(paste("Diagram Sheparda, k =", 5)) + theme_bw() + theme(legend.position = "none")
+STRESS4 <- sum((dystanse - dystanse2)^2)
+
+(p1 | p2) / (p3 | p4)
+```
+
+Diagramy Sheparda (wykres \ref{fig:shepard}) są zbliżone dla każdego $k$. W celu sprawdzenia, ile wymiarów umożliwia najlepsze odwzorowanie obserwacji, narysujemy wykres wskaźników STRESS dla każdego z wymiarów (im mniejszy, tym metoda MDS lepiej wyznacza grupy dla odpowiadającej liczby wymiarów).
+
+```{r stress, fig.cap = "\\label{fig:stress}Wykres STRESS dla kolejnych czterech wymiarów MDS"}
+df <- as.data.frame(cbind(2:5, c(STRESS1, STRESS2, STRESS3, STRESS4)))
+colnames(df) <- c("wymiar", "stres")
+
+ggplot(df, aes(x = wymiar, y = stres)) + 
+  geom_point(size = 4) +
+  geom_line(linewidth = .8) +
+  theme_minimal()
+```
+
+Z wykresu \ref{fig:stress} wynika, że algorytm MDS najlepiej zadziała dla trzech i czterech wymiarów (dla $k=3$ nieco lepsze działanie), dla większych wymiarów błąd zaczyna już rosnąć.
+
+```{r mds.wykresy, fig.width = 6, fig.cap = "\\label{fig:mds.wykresy}Wykresy rozrzutu przedstawiające podział na grupy za pomocą MDS. Na lewym  wykresie wyróżniono płeć pasażerów, na prawym - klasę."}
+mds.df <- as.data.frame(mds.dobre)
+p1 <- ggplot(mds.df, aes(x = V1, y = V2, color = titanic.subset$Sex)) + geom_point(size = 3, alpha = .5) +
+  theme_minimal() +
+  scale_color_discrete(name = element_blank(), labels = c("Kobieta", "Mężczyzna")) +
+  labs(title = "Płeć") +
+  theme(aspect.ratio = 1)
+
+p2 <- ggplot(mds.df, aes(x = V1, y = V2, color = titanic.subset$Survived)) + geom_point(size = 3, alpha = .5) +
+  theme_minimal() +
+  labs(title = "Ocalał(a)?") +
+  scale_color_viridis(discrete = TRUE, option = "viridis", name = element_blank(), labels = c("Nie", "Tak")) +
+  theme(aspect.ratio = 1)
+  
+p3 <- ggplot(mds.df, aes(x = V1, y = V2, color = titanic.subset$Pclass)) + geom_point(size = 3, alpha = .5) +
+  theme_minimal() +
+  labs(title = "Klasa") +
+  scale_color_viridis(discrete = TRUE, option = "cividis", name = element_blank(), labels = c("pierwsza", "druga", "trzecia")) +
+  theme(aspect.ratio = 1)
+
+(p1 | p3)
+```
+
+MDS z użyciem dwóch wymiarów podzielił nam obserwacje na dwa duże skupiska, które możemy zinterpretować jako podział pasażerów na płeć (wykres \ref{fig:mds.wykresy}). Widzimy też podział obserwacji na zakupione bilety na daną klasę, od północy prezentowane są grupy z zakupionymi biletami na pierwszą klasę, zaś kolorem żółtym na południu zaznaczeni są pasażerowie z klasą trzecią na bilecie. Grupy są zatem proste do odczytania.
+
+Jak prezentuje się wskaźnik przeżycia w ów grupach?
+
+```{r survived, fig.cap = "\\label{fig:survived}Wykres rozrzutu przedstawiające podział na grupy za pomocą MDS, wyróżniono na nim obserwacje reprezentujące pasażerów ocalałych i nieocalałych"}
+p2
+```
+
+Biorąc pod uwagę wykres \ref{fig:survived}, możemy zauważyć, iż większą część ocalałych stanowi grupa mężczyzn (więcej ocalałych znajduje się w grupie reprezentującą mężczyzn, patrz wykres \ref{fig:mds.wykresy}). Widzimy też, że osoby, że wśród mężczyzn, najwięcej nie przeżyło katastrofy ta grupa pasażerów, która zakupiła bilet na klasę trzecią, co wśród kobiet nie jest już takie oczywiste - dla każdej z klas zdecydowana część zginęła.
+
+Pamiętajmy jednak, że opieramy swoje obserwacje na zbiorze danych `titanic_train`, który nie jest kompletnym zbiorem danych wszystkich pasażerów Titanica. Nasze dane zawierają `r nrow(titanic_train)`, natomiast faktycznych pasażerów na statku w dniu katastrofy było około 2200, więc w celu zweryfikowania powyższych wniosków, należy przeprowadzić podobną analizę na całym zbiorze danych.
+
+
+
+
+
+

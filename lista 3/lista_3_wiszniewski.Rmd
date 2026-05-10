@@ -1,0 +1,1164 @@
+---
+title: "Lista 3"
+subtitle: "Eksploracja danych"
+author: "Jakub Wiszniewski, album 282224"
+date: "`r Sys.Date()`, Anno Domini"
+header-includes:    
+  - \usepackage[OT4]{polski}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{graphicx}
+  - \usepackage{float}
+  - \usepackage{caption}
+  - \captionsetup{justification=centering}
+  - \renewcommand{\figurename}{Wykres}
+  - \renewcommand{\tablename}{Tabela}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE,
+                      cache = FALSE)
+knitr::opts_chunk$set(fig.pos = "H",
+                      out.extra = "",
+                      fig.align = "center")
+
+#install.packages("knitr")
+library(knitr)
+
+#install.packages("kableExtra")
+library(kableExtra)
+
+#install.packages("ipred")
+library(ipred) # nie mogę tego pobrać w A.06
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+#install.packages("patchwork")
+library(patchwork)
+
+#install.packages("tidyr")
+library(tidyr)
+
+#install.packages("reshape2")
+library(reshape2)
+
+#install.packages("class")
+library(class) # KNN
+
+#install.packages("rpart")
+library(rpart) # drzewa klasyfikacyjne
+
+#install.packages("rpart.plot")
+library(rpart.plot) # drzewa klasyfikacyjne
+
+#install.packages("e1071")
+library(e1071) # naiwny Bayes
+
+#install.packages("viridis")
+library(viridis)
+
+#install.packages("HDclassif")
+library(HDclassif)
+
+cols <- viridis_pal(begin = .6, end = 1)
+colors.disc <- as.list(cols(3))
+```
+
+# Zastosowanie regresji liniowej do problemu klasyfikacji
+
+## Regresja liniowa dla danych `iris`
+<!--  a. ANALIZOWANIE DANYCH  -->
+
+<!-- Załadowanie danych iris -->
+
+Celem pierwszej części raportu jest zbadanie możliwości zastosowania regresji liniowej do klasyfikacji danych. Zbiorem danych, na których testowany będzie ten algorytm klasyfikacji, będzie `iris` z pakietu `datasets`.
+
+```{r iris}
+data(iris)
+
+# K = 3, p = 4
+klasy <- as.character(unique(iris$Species))
+zmienne.objasniajace <- colnames(iris[1:4])
+```
+
+Dane `iris` zawierają informacje na temat długości i szerokości działek kielicha oraz długości i szerokości płatków korony irysów. Te cechy będą nazywane zmiennymi objaśniającymi i oznaczane kolejno jako **SL**, **SW**, **PL** oraz **PW**. Zbiór danych zawiera trzy klasy - *setosa*, *versicolor* i *virginica*. 
+
+<!--  b. PODZIAŁ DANYCH NA DWA ZBIORY -->
+
+<!-- Przygotowanie do stworzenia modelu -->
+
+```{r podzial_na_zbiory}
+set.seed(111)
+probka.do.nauki <- sample(1:nrow(iris), size = 2 / 3 * nrow(iris))
+
+zbior.do.nauki <- iris[probka.do.nauki, ]
+zbior.do.testow <- iris[-probka.do.nauki, ]
+```
+
+<!--  c. KONSTRUKCJA KLASYFIKATORA -->
+
+<!-- Tworzenie modelu -->
+
+```{r tworzenie_modelu}
+model.rl <- lm(as.numeric(zbior.do.nauki$Species) ~ ., data = zbior.do.nauki)
+```
+
+<!-- Wyznaczenie prognoz -->
+
+```{r wyznaczenie_prognoz}
+pred.nauka <- predict(model.rl, zbior.do.nauki)
+pred.test <- predict(model.rl, zbior.do.testow)
+```
+
+<!--  d. OCENA JAKOŚCI MODELU -->
+
+<!-- Macierz pomyłek-->
+
+```{r macierze_pomylek}
+macierz.pomylek.nauka <- table(round(pred.nauka), zbior.do.nauki$Species)
+blad.klasyfikacji.nauka <- sum(diag(macierz.pomylek.nauka)) / length(probka.do.nauki)
+
+macierz.pomylek.test <- table(round(pred.test), zbior.do.testow$Species)
+blad.klasyfikacji.test <- sum(diag(macierz.pomylek.test)) / (nrow(iris) - length(probka.do.nauki))
+```
+
+<!-- Wizualizacja klasyfikacji -->
+
+Zbiór `Wine` zostanie podzielony na zbiór uczący oraz testowy w stosunku 2:1, następnie na zbiorze treningowym dopasowano model regresji liniowej za pomocą funkcji `lm` z pakietu `stats`. Klasyfikacje obserwacji do odpowiednich klas, będący efektem działania funkcji odpowiedzialnej za regresję liniową, przedstawia wykres \ref{fig:wykresy}.
+
+```{r wykresy, fig.cap = "\\label{fig:wykresy}Wykresy rozrzutu dla zbioru treningowego (po lewej) oraz zbioru testowego (po prawej). Każdy punkt odpowiada jednej obserwacji, a kolor odpowiada przynależności do jej klasy."}
+kolory <- rep(colors.disc[[1]], times = nrow(zbior.do.nauki))
+kolory[which(zbior.do.nauki$Species == "setosa")] <- colors.disc[2]
+kolory[which(zbior.do.nauki$Species == "virginica")] <- colors.disc[3]
+
+# Wyznaczenie ramki do nauki
+df.nauka <- data.frame(lp = 1:length(pred.nauka), pred = pred.nauka)
+# Wykres klasyfikacji zbioru do nauki
+p1 <- ggplot(df.nauka, aes(x = lp, y = pred, color = kolory)) +
+  geom_point(size = 4,
+             alpha = .8,
+             shape = 17) +
+  theme_bw() +
+  labs(title = "Zbiór do nauki") +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+# Wyznaczenie ramki do testów
+df.test <-  data.frame(lp = 1:length(pred.test), pred = pred.test)
+# Wykres klasyfikacji zbioru do nauki
+p2 <- ggplot(df.test, aes(
+  x = lp,
+  y = pred,
+  color = zbior.do.testow$Species
+)) +
+  geom_point(size = 4,
+             alpha = .8,
+             shape = 17) +
+  theme_bw() +
+  scale_color_manual(values = c(
+    setosa = colors.disc[2],
+    versicolor = colors.disc[1],
+    virginica = colors.disc[3]
+  )) +
+  labs(color = "a", title = "Zbiór testowy") +
+  guides(color = guide_legend(title = "Gatunek")) +
+  theme(aspect.ratio = 1)
+
+# Rysowanie wykresów obok siebie (patchwork)
+(p1 |
+    p2) + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+W przypadku zbioru treningowego widać wyraźne skupiska odpowiadające poszczególnym klasom. Szczególnie klasa *setosa* tworzy dobrze odseparowaną grupę, co sugeruje, że jest łatwa do rozróżnienia. Obserwacje należące do klas *versicolor* i *virginica* częściowo na siebie nachodzą, co może utrudniać ich odróżnienie przez zastosowany model regresji liniowej. Podobny efekt możliwy jest do zauważenia w przypadku zbioru testowego, w którym klasa *setosa* jest bardzo dobrze odróżniana od pozostałych, które również się pokrywają.
+
+<!-- Wizualizacja efektywności modelu -->
+
+```{r efektywnosc_wykres, fig.cap = "\\label{fig:efektywnosc_wykres}Wykres słupkowy przedstawiający liczebność poszczególnych klas w obu zbiorach oraz liczbę obserwacji sklasyfikowanych do nich przez model regresji liniowej."}
+# Wyznaczenie ramki do wykresu słupkowego
+df.compare <- data.frame(Klasa = c(
+  as.character(zbior.do.testow$Species),
+  as.character(factor(round(pred.test), labels = levels(iris$Species)))
+),
+Typ = c(rep(
+  "Rzeczywista", length(zbior.do.testow$Species)
+), rep("Predykcja", length(
+  factor(round(pred.test), labels = levels(iris$Species))
+))))
+
+# Rysowanie porównania
+p1 <- ggplot(df.compare, aes(x = Klasa, fill = Typ)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Zbiór testowy",
+       x = "Klasa",
+       y = "Liczba przypadków",
+       fill = "Rodzaj") +
+  scale_fill_manual(
+    values = c(
+      Predykcja = colors.disc[1],
+      Rzeczywista = colors.disc[3]
+    )
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+# Wyznaczenie ramki do wykresu słupkowego
+df.compare <- data.frame(Klasa = c(
+  as.character(zbior.do.nauki$Species),
+  as.character(factor(round(pred.nauka), labels = levels(iris$Species)))
+),
+Typ = c(rep(
+  "Rzeczywista", length(zbior.do.nauki$Species)
+), rep("Predykcja", length(
+  factor(round(pred.nauka), labels = levels(iris$Species))
+))))
+
+# Rysowanie porównania
+p2 <- ggplot(df.compare, aes(x = Klasa, fill = Typ)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Zbiór treningowy",
+       x = "Klasa",
+       y = "Liczba przypadków",
+       fill = "Rodzaj") +
+  scale_fill_manual(
+    values = c(
+      Predykcja = colors.disc[1],
+      Rzeczywista = colors.disc[3]
+    )
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+((p2 | p1) + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")) + 
+  plot_annotation(title = "Porównanie rozkładu klas", theme = theme(plot.title = element_text(hjust = .5, size = 15)))
+```
+
+Z wykresu \ref{fig:efektywnosc_wykres} można odczytać, iż model regresji liniowej dla obu zbiorów poradził sobie dobrze z przypisaniem obserwacji do odpowiednich klas. Liczba przypisanych obserwacji dla każdej klasy jest bliska rzeczywistej liczba obserwacji do nich należących, jednak dla klasy drugiej wystąpiły błędne klasyfikacje pojedynczych obserwacji. Może to sugerować fakt maskowania klasy drugiej przez klasę pierwszą i trzecią.
+
+## Regresja liniowa dla rozszerzonej przestrzeni cech
+
+<!-- e. BUDOWA MODELU LINIOWEGO (ROZSZERZONA PRZESTRZEŃ CECH) -->
+
+<!-- Tworzenie zwiększonej ramki danych -->
+
+W kolejnej części analizy rozszerzono przestrzeń cech, uwzględniając dodatkowe przekształcenia zmiennych objaśniających, czyli do ramki danych `iris` dodano kolejne cechy, będące iloczynem każdej kombinacji cech **SL**, **SW**, **PL** i **PW**. Celem było sprawdzenie, czy bardziej złożona reprezentacja danych pozwoli uzyskać jeszcze lepsze dopasowanie modelu regresyjnego oraz poprawić jakość klasyfikacji.
+
+```{r iris_powiekszone}
+iris.kw <- iris
+names(iris.kw) <- c("SL", "SW", "PL", "PW", "Spec")
+iris.kw <- transform(
+  iris.kw,
+  SL.SW = SL * SW,
+  PL.PW = PL * PW,
+  PL.SL = PL * SL,
+  PL.SW = PL * SW,
+  PW.SW = PW * SW,
+  PW.SL = PW * SL,
+  PL2 = PL * PL,
+  PW2 = PW * PW,
+  SL2 = SL * SL,
+  SW2 = SW * SW
+)
+```
+
+Na podstawie nowo utworzonego zbioru danych ponownie dokonano podziału na zbiór treningowy i testowy w stosunku 2:1. Następnie, podobnie jak wcześniej, utworzono model regresji liniowej z wykorzystaniem funkcji `lm`.
+
+<!-- Podział na zbiory do nauki i testów -->
+
+```{r podzial_powiekszony}
+zbior.kw.do.nauki <- iris.kw[probka.do.nauki, ]
+zbior.kw.do.testow <- iris.kw[-probka.do.nauki, ]
+```
+
+<!-- Tworzenie modelu i predykcji -->
+
+```{r model_i_predykcje_powiekszone}
+model.rl.kw <- lm(as.numeric(zbior.do.nauki$Species) ~ ., data = zbior.kw.do.nauki)
+
+pred.kw.nauka <- predict(model.rl.kw, zbior.kw.do.nauki)
+pred.kw.test <- predict(model.rl.kw, zbior.kw.do.testow)
+```
+
+```{r macierze_pomylek_i_bledy}
+macierz.pomylek.kw.nauka <- table(round(pred.kw.nauka), zbior.do.nauki$Species)
+blad.klasyfikacji.kw.nauka <- sum(diag(macierz.pomylek.nauka)) / length(probka.do.nauki)
+
+macierz.pomylek.kw.test <- table(round(pred.kw.test), zbior.do.testow$Species)
+blad.klasyfikacji.kw.test <- sum(diag(macierz.pomylek.kw.test)) / (nrow(iris.kw) - length(probka.do.nauki))
+```
+
+<!-- Porównanie metody liniowej i kwadratowej -->
+
+```{r wykresy2, fig.cap = "\\label{fig:wykresy2}Wykresy rozrzutu dla zbioru treningowego (po lewej) oraz zbioru testowego (po prawej) zbioru danych z rozszerzoną przestrzenią cech. Każdy punkt odpowiada jednej obserwacji, a kolor odpowiada przynależności do jej klasy."}
+kolory <- rep(colors.disc[[1]], times = nrow(zbior.kw.do.nauki))
+kolory[which(zbior.kw.do.nauki$Spec == "setosa")] <- colors.disc[2]
+kolory[which(zbior.kw.do.nauki$Spec == "virginica")] <- colors.disc[3]
+
+# Wyznaczenie ramki do nauki
+df.nauka <- data.frame(lp = 1:length(pred.kw.nauka), pred = pred.kw.nauka)
+# Wykres klasyfikacji zbioru do nauki
+p1 <- ggplot(df.nauka, aes(x = lp, y = pred, color = kolory)) +
+  geom_point(size = 4,
+             alpha = .8,
+             shape = 17) +
+  theme_bw() +
+  labs(title = "Zbiór do nauki") +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+# Wyznaczenie ramki do testów
+df.test <-  data.frame(lp = 1:length(pred.kw.test), pred = pred.kw.test)
+# Wykres klasyfikacji zbioru do nauki
+p2 <- ggplot(df.test, aes(
+  x = lp,
+  y = pred,
+  color = zbior.kw.do.testow$Spec
+)) +
+  geom_point(size = 4,
+             alpha = .8,
+             shape = 17) +
+  theme_bw() +
+  scale_color_manual(values = c(
+    setosa = colors.disc[2],
+    versicolor = colors.disc[1],
+    virginica = colors.disc[3]
+  )) +
+  labs(color = "a", title = "Zbiór testowy") +
+  guides(color = guide_legend(title = "Gatunek")) +
+  theme(aspect.ratio = 1)
+
+# Rysowanie wykresów obok siebie (patchwork)
+(p1 |
+    p2) + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")
+```
+
+Dzięki wprowadzeniu dodatkowych zmiennych objaśniających, granice pomiędzy klasami stały się bardziej widoczne, co sprzyja dokładniejszej klasyfikacji. Na wykresie \ref{fig:wykresy2} zaobserwować można, że wszystkie klasy są rozłożone w odpowiadających skupiskach i nie nachodzą na siebie. Fakt ten sugeruje, że model zyskał większą zdolność do ich rozróżniania. Porównajmy wyniki dystrybucji zmiennych do ich klas.
+
+```{r efektywnosc_wykres2, fig.cap = "\\label{fig:efektywnosc_wykres2}Wykres słupkowy przedstawiający liczebność poszczególnych klas w obu zbiorach oraz liczbę obserwacji sklasyfikowanych do nich przez model regresji liniowej zbioru z rozszerzoną przestrzenią cech."}
+# Wyznaczenie ramki do wykresu słupkowego
+df.compare <- data.frame(Klasa = c(
+  as.character(zbior.kw.do.testow$Spec),
+  as.character(factor(round(pred.kw.test), labels = levels(iris$Species)))
+),
+Typ = c(rep(
+  "Rzeczywista", length(zbior.kw.do.testow$Spec)
+), rep("Predykcja", length(
+  factor(round(pred.kw.test), labels = levels(iris$Species))
+))))
+
+# Rysowanie porównania
+p1 <- ggplot(df.compare, aes(x = Klasa, fill = Typ)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Zbiór testowy",
+       x = "Klasa",
+       y = "Liczba przypadków",
+       fill = "Rodzaj") +
+  scale_fill_manual(
+    values = c(
+      Predykcja = colors.disc[1],
+      Rzeczywista = colors.disc[3]
+    )
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+# Wyznaczenie ramki do wykresu słupkowego
+df.compare <- data.frame(Klasa = c(
+  as.character(zbior.kw.do.nauki$Spec),
+  as.character(factor(round(pred.kw.nauka), labels = levels(iris$Species)))
+),
+Typ = c(rep(
+  "Rzeczywista", length(zbior.kw.do.nauki$Spec)
+), rep("Predykcja", length(
+  factor(round(pred.kw.nauka), labels = levels(iris$Species))
+))))
+
+# Rysowanie porównania
+p2 <- ggplot(df.compare, aes(x = Klasa, fill = Typ)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Zbiór treningowy",
+       x = "Klasa",
+       y = "Liczba przypadków",
+       fill = "Rodzaj") +
+  scale_fill_manual(
+    values = c(
+      Predykcja = colors.disc[1],
+      Rzeczywista = colors.disc[3]
+    )
+  ) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  theme(aspect.ratio = 1)
+
+((p2 | p1) + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom")) + 
+  plot_annotation(title = "Porównanie rozkładu klas", theme = theme(plot.title = element_text(hjust = .5, size = 15)))
+```
+
+Na podstawie wykresu \ref{fig:efektywnosc_wykres2} można stwierdzić, iż (niemal) wszystkie obserwacje poprawnie zostały sklasyfikowane do swoich klas. 
+
+```{r wskazniki_porownanie, tab.cap = "\\label{tab:slen}Porównanie zgodności klasyfikacji na podstawie klasycznego modelu regresji liniowej oraz regresji rozszerzonej o wielomiany stopnia drugiego."}
+procent <- function(X) {
+  X <- round(as.numeric(X), 4)
+  procent <- paste0(100*X, "%")
+  return(procent)
+}
+
+df <- data.frame(klasyczny = c(procent(blad.klasyfikacji.nauka), procent(blad.klasyfikacji.test)),
+                 rozszerzony = c(procent(blad.klasyfikacji.kw.nauka), procent(blad.klasyfikacji.kw.test)))
+
+rownames(df) <- c("zbiór do nauki", "zbiór testowy")
+kable(df,
+      align = "cc",
+      format = "latex") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Tabela \ref{tab:slen} porównuje zgodności klasyfikacji na zbiorze treningowym i testowym dla metody regresji liniowej oraz dla metody regresji liniowej z rozszerzoną przestrzenią cech. Druga opcja działa o wiele lepiej -- możemy zauważyć stuprocentową skuteczność dla zbioru testowego. Poprzez rozszerzenie przestrzeni cech o wielomiany drugiego stopnia uniknięto maskowania klasy drugiej przez otaczające ją klasy, dlatego przy tworzeniu modelu regresji liniowej dla zbioru danych o liczbie klas większej niż dwie należy zastosować właśnie taką procedurę lub skorzystać z jednej z konkurencyjnych metod.
+
+# Porównanie metod klasyfikacji - zbiór `Wine`
+
+## Przygotowanie danych do klasyfikacji
+
+### Przygotowanie i opis danych `Wine` 
+
+<!--  a. WYBÓR I ZAPOZNANIE SIĘ Z DANYMI -->
+
+<!-- Wybrane dane: "wine" {HDclassif}-->
+
+```{r dane_wine}
+# Wybrany zbiór danych - "wine" z biblioteki {HDclassif}
+library(HDclassif)
+data("wine")
+
+#nrow(wine) # 178 obserwacji
+#ncol(wine) # 14 cech
+#str(wine) # klasy oznaczone są jako 1, 2 i 3
+# zmiana typu danych:
+wine$class <- as.factor(wine$class)
+wine$V5 <- as.numeric(wine$V5)
+wine$V13 <- as.numeric(wine$V5)
+```
+
+Zbiór danych `Wine`, dostępny w pakiecie `HDclassif`, zawiera informacje chemiczne o próbkach trzech gatunków wina, pochodzących z tego samego regionu Włoch, lecz wyprodukowanych z różnych szczepów winorośli. Zbiór składa się ze 178 obserwacji, z których każda reprezentuje jedną próbkę wina. Dla każdej próbki zmierzono 13 cech chemicznych, takich jak m.in. zawartość alkoholu, kwasów fenolowych czy barwników. Zmienne te będą nazywane zmiennymi objaśniającymi, natomiast klasą jest typ wina, oznaczony jako jedna z trzech klas 1, 2 lub 3 pod cechą `class` (konieczna była zmiana typu cechy na typ `factor`). Zbiór danych nie zawiera wartości brakujących.
+
+<!-- b. CEL ANALIZY -->
+
+<!-- c. WSTĘPNA ANALIZA DANYCH -->
+
+<!-- Dalsze zapoznanie się z danymi -->
+
+```{r dalsze_dane_wine}
+wszystkich.na <- sum(is.na(wine)) # brak wartości brakujących
+
+liczebnosc <- table(wine$class) # liczebność poszczególnych grup - najwięcej klasy 2
+
+blad.klasyfikacji.do.jednej <- sum(liczebnosc[-2])/sum(nrow(wine))*100 # procent 
+```
+
+### Standaryzacja danych
+
+<!-- Badanie wariancji w celu podjęcia decyzji o standaryzacji -->
+
+Przyjrzyjmy się wariancjom poszczególnych cech (wykres \ref{fig:wariancje_boxploty}).
+
+```{r wariancje_boxploty, fig.cap = "\\label{fig:wariancje_boxploty}Wykres pudełkowy przedstawiający wariancję cech zbioru `Wine`."}
+dane.dlugie <- pivot_longer(as.data.frame(wine[, -1]), cols = everything(), names_to = "Cecha", values_to = "Wartość")
+
+ggplot(dane.dlugie, aes(x = Cecha, y = Wartość, fill = Cecha)) +
+  geom_boxplot(fill = viridis(13, 1, .4, 1)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+    legend.margin = margin(65, 0, 0, 0),
+    legend.position = "none") + 
+  labs(x = element_blank())
+```
+
+<!-- Standaryzacja danych (wymagana dla niektórych algorytmów) -->
+
+W zależności od zastosowanych algorytmów klasyfikacyjnych – warto rozważyć standaryzację. W zbiorze `Wine` cechy mają różne jednostki oraz zakresy wartości, co prowadzi do zróżnicowanych wariancji. Algorytmy oparte na odległościach (np. k-najbliższych sąsiadów) mogą być szczególnie wrażliwe na takie różnice, ponieważ cechy o wyższej wariancji będą miały większy wpływ na końcową metrykę. 
+
+Z kolei algorytmy bazujące na drzewach decyzyjnych są mniej zależne od skali cech, dla nich różnice wariancji mają mniejsze znaczenie. Dlatego decyzja o standaryzacji zależy głównie od tego, które modele chcemy później zastosować. Wyniki standaryzacji danych `Wine` przedstawia wykres \ref{fig:stand_wine}.
+
+```{r stand_wine, fig.cap = "\\label{fig:stand_wine}Wykres pudełkowy przedstawiający wariancję ustandaryzowanych cech zbioru `Wine`."}
+stand.wine <- scale(wine[, -1])
+dane.dlugie <- pivot_longer(as.data.frame(stand.wine), cols = everything(), names_to = "Cecha", values_to = "Wartość")
+
+ggplot(dane.dlugie, aes(x = Cecha, y = Wartość, fill = Cecha)) +
+  geom_boxplot(fill = viridis(13, 1, .4, 1)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+    legend.margin = margin(65, 0, 0, 0),
+    legend.position = "none") + 
+  labs(x = element_blank())
+```
+
+### Wybór najlepszych cech dyskryminujących - test ANOVA
+
+<!-- Wybór najlepszej cechy do dyskryminacji (ANOVA test)-->
+
+Aby ocenić, które zmienne najlepiej rozróżniają obserwacje należące do różnych klas, warto przyjrzeć się ich zdolnościom dyskryminacyjnym. Jedną z metod jest wykonanie dla każdej cechy jednoczynnikowej analizy wariancji (ANOVA), gdzie dla każdej zmiennej liczony jest wskaźnik F (stosunek wariancji międzyklasowej do wariancji wewnątrzklasowej). Im wyższa wartość F, tym dany atrybut lepiej separuje klasy.
+
+```{r old.wykresy_zmiennych, fig.width = 7, fig.height = 8.5}
+# zmienne.wina.wykres <- function(var) {
+#   y <- as.numeric(wine$class)/4 * runif(nrow(wine), .9, 1.11)
+#   
+#   p <- ggplot(stand.wine, aes(x = stand.wine[, var], y = y, colour = wine$class)) +
+#     geom_point(alpha = .8, size = 3) + 
+#     theme_bw() +
+#     theme(
+#       axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+#       legend.margin = margin(65, 0, 0, 0),
+#       legend.position = "none") + 
+#     labs(x = element_blank(), y = element_blank(), title = var)
+#     
+#   return(pl = p)
+# }
+# 
+# wykresy <- tapply(colnames(stand.wine), colnames(stand.wine), zmienne.wina.wykres)
+# ( (wykresy$V1 | wykresy$V2 | wykresy$V3 | wykresy$V4) / (wykresy$V5 | wykresy$V6 | wykresy$V7 | wykresy$V8) / (wykresy$V9 | wykresy$V10 | wykresy$V11 | wykresy$V12) ) +
+#   plot_layout(guides = "collect")
+```
+
+```{r anova_test, fig.cap = "\\label{anova_text}Wykres słupkowy reprezentujący znaczenie danej cechy w separowaniu klas. Im wyższa wartość, tym lepsza zdolność dyskretyzacji."}
+wartosci.f.anova <- sapply(wine[, -1], function(var){
+  anova <- aov(var ~ wine$class) # przeprowadzamy test anova
+  anova.summary <- summary(anova) # tworzymy podsumowanie testu
+  return(anova.summary[[1]][["F value"]][[1]]) # wybieramy z niego informację o wskaźniku F
+})
+
+# ramka danych z tabelką do wydrukowania
+anova.df <- data.frame(
+  cecha = names(wartosci.f.anova),
+  wartosc.f = round(wartosci.f.anova, 2)
+)
+
+# posortowanie tabeli względem wartości wskaźnika F malejąco
+malejaco.wg.anova <- order(anova.df$wartosc.f, decreasing = TRUE)
+
+anova.df$cecha <- factor(anova.df$cecha, levels = paste0("V", malejaco.wg.anova), ordered = TRUE)
+
+ggplot(anova.df, aes(x = cecha, y = wartosc.f)) +
+  geom_bar(stat = "identity", fill = viridis(13, 1, .4, 1)) +
+  theme_minimal() +
+  labs(title = "Zdolności dyskryminacyjne cech")
+# kable(anova.df, format = "latex", row.names = FALSE, col.names = c("Cecha", "Wartość F")) %>%
+# kable_styling(latex_options = "HOLD_position")
+```
+
+Na podstawie wykresu \ref{fig:anova_test} można odczytać cechy zbioru danych `Wine` w kolejności od najlepiej separujących obserwacje, do tych dyskryminujących najgorzej. Szczególnie ważna będzie pierwsza szóstka cech dominujących w separowaniu, czyli cechy: `r as.character(anova.df$cecha[malejaco.wg.anova][1:6])`, będą one przydatne przy porównaniu metod klasyfikacji win.
+
+<!-- d. OCENA DOKŁADNOŚCI KLASYFIKACJI I PORÓWNANIE METOD -->
+
+## Klasyfikacja dla wszystkich cech
+
+Dokonamy porównania dokładności klasyfikacji trzech algorytmów:
+
+* $k$‑najbliższych sąsiadów ($k$‑NN)
+
+* drzewa decyzyjne,
+
+* naiwny klasyfikator Bayesowski.
+
+Analizę najpierw wykonamy na podstawie podziału danych na zbiór uczący (70%) i testowy (30%). Następnie sprawdzimy, jak zmienia się skuteczność działania algorytmów dla różnych stosunków podziału danych oraz dla innych parametrów dla poszczególnych metod. 
+
+Wyniki będziemy oceniać przy użyciu macierzy pomyłek oraz błędu klasyfikacji. W dalszej części analizy przeprowadzimy ich porównanie przy pomocy **walidacji krzyżowej** (*ang. cross-validation*), schematu typu ***bootstrap*** oraz algorytmu **632+**.
+
+<!-- Podział zbioru na testowy i uczący -->
+
+```{r podzial_wina_zbiory}
+prcnt <- .7 # bierzemy  70% danych do zbioru uczącego
+
+set.seed(123) # powtarzalność losowania zbiorów
+probka.do.nauki <- sample(nrow(wine), round(prcnt*nrow(wine)))
+
+zbior.do.nauki <- wine[probka.do.nauki, ]
+zbior.do.testow <- wine[-probka.do.nauki, ]
+
+zbior.do.nauki.stand <- stand.wine[probka.do.nauki, ]
+zbior.do.testow.stand <- stand.wine[-probka.do.nauki, ]
+
+klasy.treningowe <- zbior.do.nauki$class
+klasy.testowe <- zbior.do.testow$class
+
+cechy.treningowe <- zbior.do.nauki[, -1]
+cechy.testowe <- zbior.do.testow[, -1]
+
+cechy.treningowe.stand <- zbior.do.nauki.stand[, -1]
+cechy.testowe.stand <- zbior.do.testow.stand[, -1]
+```
+
+### Klasyfikacja przy użyciu algorytmów $k$-NN
+
+<!--  METODA K-NAJBLIŻSZYCH SĄSIADÓW -->
+
+<!--  Ilu sąsiadów wybrać? -->
+
+Optymalna wartość parametru $k$ w algorytmie $k$‑najbliższych sąsiadów nie jest ustalana z góry, jej dobór zależy od omawianych danych. Przeprowadźmy szybką symulację, która pokazuje, dla jakiej liczby najbliższych sąsiadów algorytm działa najlepiej.
+
+```{r funkcje_pomocnicze_i_najlepsze_k, fig.cap = "\\label{fig:best_k}Wykres błędu klasyfikacji k-NN dla kolejnej liczby sąsiadów k."}
+cols <- viridis_pal(1, .5, .7)
+colors.disc2 <- cols(2)
+
+macierz.pomylek <- function(predykcja, testowy = TRUE) {
+  if (testowy == TRUE) {
+    return(table(Predykcja = predykcja, Właściwe = klasy.testowe))
+  } else{
+    return(table(Predykcja = predykcja, Właściwe = klasy.treningowe))
+  }
+  
+}
+
+blad.klasyfikacji <- function(predykcja,
+                              procent = TRUE,
+                              testowy = TRUE) {
+  m.pomylek <- macierz.pomylek(predykcja, testowy)
+  
+  if (testowy == TRUE) {
+    zbior <- zbior.do.testow
+  } else{
+    zbior <- zbior.do.nauki
+  }
+  blad <- 1 - sum(diag(m.pomylek)) / nrow(zbior)
+  
+  if (procent == TRUE) {
+    return(procent(blad))
+  } else{
+    return(round(blad, 4))
+  }
+}
+
+najlepsze.k <- function(range = 20,
+                        iters = 500,
+                        rysuj = FALSE) {
+  zgodnosci.knn <- rep(0, times = range)
+  
+  for (iter in 1:iters) {
+    zgodnosci.knn <- zgodnosci.knn + sapply(1:range, function(k) {
+      pred <- knn(
+        train = cechy.treningowe.stand,
+        test = cechy.testowe.stand,
+        cl = klasy.treningowe,
+        k = k
+      )
+      return(blad.klasyfikacji(pred, FALSE))
+    })
+  }
+  
+  zgodnosci.knn <- zgodnosci.knn / iters
+  
+  if (rysuj == TRUE) {
+    df <- data.frame(k = 1:range, blad = zgodnosci.knn)
+    
+    colors <- viridis::viridis_pal()
+    p <- ggplot(df, aes(x = k, y = blad)) +
+      geom_line(color = colors.disc2[[2]]) +
+      geom_point(color = colors.disc2[[1]], size = 2) +
+      labs(x = "Wartość k", y = "Błąd klasyfikacji", title = "Wykres błędu klasyfikacji k-NN dla różnych wartości k") +
+      theme_minimal()
+    print(p)
+  }
+  
+  return(which.min(zgodnosci.knn[-1]) + 1)
+}
+
+best.k <- najlepsze.k(range = 20,
+                      iters = 200,
+                      rysuj = TRUE)
+```
+
+Poza $k = 1$, algorytm najlepiej działa dla `r best.k` sąsiadów, jednak w porównaniu uwzględnimy również algorytm dla $k = 10$.
+
+<!-- k-NN dla k = best.k sąsiadów -->
+
+```{r knn}
+knn.train.pred6 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.treningowe.stand,
+  cl =  klasy.treningowe,
+  k = best.k
+)
+
+knn.test.pred6 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.testowe.stand,
+  cl =  klasy.treningowe,
+  k = best.k
+)
+
+knn.train.pred10 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.treningowe.stand,
+  cl =  klasy.treningowe,
+  k = 10
+)
+
+knn.test.pred10 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.testowe.stand,
+  cl =  klasy.treningowe,
+  k = 10
+)
+```
+
+<!-- METODA DRZEW KLASYFIKACYJNYCH -->
+
+```{r drzewa}
+# budowa modelu drzewa
+drzewa.model <- rpart(class ~ ., data = zbior.do.nauki)
+
+drzewa.train.pred <- predict(drzewa.model, newdata = zbior.do.nauki, type = "class")
+drzewa.test.pred <- predict(drzewa.model, newdata = zbior.do.testow, type = "class")
+
+drzewa.model2 <- rpart(class ~ .,
+                       data = zbior.do.nauki,
+                       control = rpart.control(
+                         cp = .03,
+                         minsplit = 10,
+                         maxdepth = 10
+                       ))
+
+drzewa.train.pred2 <- predict(drzewa.model2, newdata = zbior.do.nauki, type = "class")
+drzewa.test.pred2 <- predict(drzewa.model2, newdata = zbior.do.testow, type = "class") 
+```
+
+<!-- METODA NAIWNEGO BAYESA -->
+
+```{r nb}
+# budowa modelu naiwnego bayesa
+nb.model <- naiveBayes(class ~ ., data = zbior.do.nauki)
+
+nb.train.pred <- predict(nb.model, zbior.do.nauki)
+nb.test.pred <- predict(nb.model, zbior.do.testow)
+```
+
+<!-- PORÓWNANIE METOD KLASYFIKACYJNYCH -  -->
+
+```{r definicje_heatmap}
+colors <- viridis(2, begin = .6, end = 1)
+
+heatmapa <- function(pred,
+                     testowy = TRUE,
+                     title = "") {
+  m <- macierz.pomylek(pred, testowy)
+  df <- melt(m)
+  
+  ggplot(df, aes(x = Właściwe, y = Predykcja, fill = value)) +
+    geom_tile() +
+    geom_text(aes(label = value), color = "black", size = 5) +
+    scale_fill_gradientn(colours = colors) +
+    labs(
+      title = title,
+      x = "Rzeczywista klasa",
+      y = "Przewidziana klasa",
+      fill = "Liczba elementów"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(hjust = .5)) +
+    coord_fixed(ratio = 1)
+}
+
+zestawienie.heatmap <- function(pred.train, pred.test, title = "") {
+  heatmapa(pred.train, testowy = FALSE, title = "Zbiór treningowy") +
+    heatmapa(pred.test, title = "Zbiór testowy") +
+    plot_annotation(title = title,
+                    theme = theme(plot.title = element_text(hjust = .5, size = 15)))
+}
+```
+
+\newpage
+
+Wizualizację klasyfikacji win przeprowadzimy za pomocą *heatmap* reprezentujących macierze pomyłek. Zaczniemy od algorytmu 10-NN.
+
+```{r heatmap_knn10, fig.cap = "\\label{fig:knn10}Macierze pomyłek dla algorytmu 10-NN."}
+zestawienie.heatmap(knn.train.pred10,
+                    knn.test.pred10,
+                    "10-NN - zestawienie macierzy pomyłek")
+```
+
+Z macierzy pomyłek, przedstawionych na wykresie \ref{fig:knn10} odczytujemy, iż wina klasy drugiej były na obu zbiorach mylone najczęściej z klasą pierwszą, ale dla zbioru treningowego dwa elementy zostały niesłusznie przyporządkowane do klasy trzeciej. Można przypuszczać, że cechy odróżniające klasę pierwszą od klasy drugiej nie są dostatecznie wyraźne lub występuje pewne ich nakładanie się. Klasa trzecia jest najczęściej dobrze przewidywana.
+
+Algorytm $k$-NN dla $k =$ `r best.k` będzie radził sobie lepiej od $k=10$. Sprawdźmy macierze pomyłek dla tej metody.
+
+```{r heatmap_knnbest, fig.cap = "\\label{fig:knnbest}Macierze pomyłek dla algorytmu 3-NN."}
+zestawienie.heatmap(knn.train.pred6,
+                    knn.test.pred6,
+                    paste0(best.k, "-NN - zestawienie macierzy pomyłek"))
+```
+
+Wykres \ref{fig:knnbest} przedstawia macierze pomyłek dla najoptymalniejszej liczby sąsiadów. Zarówno dla zbioru treningowego, jak i testowego widać, że model 3-NN osiąga wysoką dokładność - ponad 90% w obu przypadkach. Jest to wyraźna poprawa względem klasyfikatora 10-NN, którego wyniki były nieco niższe. Klasy są często rozpoznawane poprawnie, a to wskazuje na silną separację tych grup.
+
+\newpage
+
+### Klasyfikacja przy użyciu drzew klasyfikacyjnych
+
+Algorytm wykorzystujący drzewa klasyfikacyjne działa jeszcze lepiej. Działanie modelu z domyślnymi parametrami możemy śledzić na wykresie \ref{fig:drzewo1}.
+
+```{r drzewo_pokaz, fig.cap = "\\label{fig:drzewo1}Wykres przedstawiający strukturę drzewa, będącego modelem klasyfikacji danych `Wine`."}
+cols <- viridis_pal(begin = .6, end = 1)
+colors.disc <- as.list(cols(3))
+rpart.plot(drzewa.model, box.palette = colors.disc)
+```
+
+Widzimy, że algorytm porównuje cechy kolejnych obserwacji z wyznaczonymi progami. Zaczynając od klasy drugiej - po spełnionym pierwszym kryterium przyporządkowuje on element do klasy pierwszej lub trzeciej. Schodząc niżej, porównywane są kolejne cechy do odpowiednich wartości i na tej podstawie są przyporządkowane do prawdziwych grup z większym prawdopodobieństwem. Zwróćmy uwagę na macierz pomyłek tego algorytmu.
+
+```{r heatmap_drzewa, fig.cap = "\\label{fig:heatmap_drzewa}Macierze pomyłek dla algorytmu wykorzystującego drzewa."}
+zestawienie.heatmap(drzewa.train.pred, drzewa.test.pred, "Drzewo klasyfikacyjne - macierze pomyłek")
+```
+
+Wartości na przekątnej są znacznie wyższe w przeciwieństwie do elementów poza przekątną, zatem drzewo decyzyjne skutecznie „nauczyło się” cech klas na zbiorze treningowym. W zbiorze treningowym klasa pierwsza i druga były czasami mylone, zatem możliwe jest podobieństwo tych dwóch klas, przynajmniej pod względem niektórych z cech. Na zbiorze testowym metoda drzew klasyfikacyjnych poradziła sobie prawie bezbłędnie - tylko jeden element został źle sklasyfikowany.
+
+\newpage
+
+Drzewo ze zmienionymi parametrami poradziło sobie jeszcze lepiej. Zobaczmy konstrukcję zmienionego drzewa.
+
+```{r drzewo_pokaz2, fig.cap = "\\label{fig:drzewo2}Wykres przedstawiający strukturę drzewa ze zmienionymi parametrami, będącego modelem klasyfikacji danych `Wine`."}
+rpart.plot(drzewa.model2, box.palette = colors.disc)
+```
+
+W porównaniu do domyślnego modelu drzewa algorytm ze zmienionymi parametrami działa podobnie, lecz pojedyncze progi, a co za tym idzie -- procent klasyfikowanych danych, zostały nieznaczne zmienione.
+
+```{r heatmap_drzewa2, fig.cap = "\\label{fig:heatmap_drzewa2}Macierze pomyłek dla algorytmu wykorzystującego drzewa (pozmieniane parametry)."}
+zestawienie.heatmap(drzewa.train.pred2, drzewa.test.pred2, "Drzewo (zmienione) - macierze pomyłek")
+```
+
+Ponownie, wartości na przekątnej są znacznie wyższe w przeciwieństwie do elementów poza przekątną, z taką różnicą, że poprawnie sklasyfikowano całą klasę pierwszą. Na zbiorze testowym metoda drzew klasyfikacyjnych poradziła sobie prawie bez żadnej pomyłki.
+
+\newpage
+
+### Klasyfikacja przy użyciu naiwnego klasyfikatora bayesowskiego
+
+W kwestii klasyfikacji również zadowalająco poradził sobie naiwny klasyfikator bayesowski. Spójrzmy na macierze pomyłek tej metody klasyfikacji.
+
+```{r heatmap_bayes, fig.cap = "\\label{fig:bayes}Macierze pomyłek dla naiwnego klasyfikatora bayesowkiego."}
+zestawienie.heatmap(nb.train.pred, nb.test.pred, "naive Bayes - macierze pomyłek")
+```
+
+W zbiorze treningowym jedynie 3 obserwacje zostały błędnie dopasowane do swojej klasy, a w zbiorze testowym była już to zaledwie jedna. Najczęściej mylonymi klasami były pierwsza z drugą, jednak skuteczność tego algorytmu jest jak najbardziej wystarczająca.
+
+### Podsumowanie klasyfikacji uwzględniającej wszystkie cechy
+
+Tabela \ref{tab:wyniki1} podsumowuje wyniki zastosowania poszczególnych metod klasyfikacji dla pojedynczego podziału zbioru na uczący i testowy.
+
+```{r wyniki, tab.cap = "\\label{tab:wyniki1}Wyniki zastosowania poszczególnych metod klasyfikacji."}
+generuj.wyniki <- function() {
+  wyniki <- data.frame(
+    Metoda = c(
+      paste0(best.k, "-NN"),
+      "10-NN",
+      "Drzewo (bazowe)",
+      "Drzewo (zmienione) ",
+      "Naive Bayes"
+    ),
+    blad.train = c(
+      blad.klasyfikacji(knn.train.pred6, testowy = FALSE),
+      blad.klasyfikacji(knn.train.pred10, testowy = FALSE),
+      blad.klasyfikacji(drzewa.train.pred, testowy = FALSE),
+      blad.klasyfikacji(drzewa.train.pred2, testowy = FALSE),
+      blad.klasyfikacji(nb.train.pred, testowy = FALSE)
+    ),
+    blad.test = c(
+      blad.klasyfikacji(knn.test.pred6),
+      blad.klasyfikacji(knn.test.pred10),
+      blad.klasyfikacji(drzewa.test.pred),
+      blad.klasyfikacji(drzewa.test.pred2),
+      blad.klasyfikacji(nb.test.pred)
+    )
+  )
+  return(wyniki)
+}
+
+wyniki <- generuj.wyniki()
+
+kable(wyniki, format = "latex") %>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Najlepiej poradził sobie algorytm wykorzystujący drzewa ze zmienionymi parametrami, a najgorzej 10-NN.
+
+Przeprowadzona analiza dotyczyła zbioru danych `Wine` podzielonych tylko raz na zbiór treningowy i testowy, ale jest to tylko jedna z opcji porównywania metod. W celu uwiarygodnienia naszych danych, porównamy metody klasyfikacji dla różnych podziałów zbioru danych, w czym pomoże nam funkcja `errorest` z pakietu `ipart`, stosując trzy różne algorytmy: walidacji krzyżowej, schematu typu bootstrap oraz algorytmu 632+. Wyniki działania funkcji `errorest` dla najlepszych wersji omawianych algorytmów przedstawiono w tabeli \ref{tab:schematy1}.
+
+```{r definicje_errorest}
+my.predict  <- function(model, newdata)
+  predict(model, newdata = newdata, type = "class")
+
+my.ipredknn <- function(formula1, data1)
+  ipredknn(formula = formula1, data = data1, k = best.k)
+my.rpart <- function(formula1, data1)
+  rpart(formula1, data1, control = rpart.control(
+    cp = .03,
+    minsplit = 10,
+    maxdepth = 10
+  ))
+my.bayes <- function(formula1, data1, ile.sasiadow)
+  naiveBayes(formula1, data1)
+
+errorest.cv <- function(model, formula)
+  errorest(
+    formula,
+    data = wine,
+    model = model,
+    predict = my.predict,
+    estimator = "cv",
+    est.para = control.errorest(k = 10)
+  )
+
+errorest.boot <- function(model, formula)
+  errorest(
+    formula,
+    data = wine,
+    model = model,
+    predict = my.predict,
+    estimator = "boot",
+    est.para = control.errorest(nboot = 50)
+  )
+
+errorest.632 <- function(model, formula)
+  errorest(
+    formula,
+    data = wine,
+    model = model,
+    predict = my.predict,
+    estimator = "632plus",
+    est.para = control.errorest(nboot = 50)
+  )
+
+generuj.wyniki.errorest <- function(formula = class ~ .){
+  knn.cv <- errorest.cv(my.ipredknn, formula)
+  drzewa.cv <- errorest.cv(my.rpart, formula)
+  nb.cv <- errorest.cv(my.bayes, formula)
+  
+  knn.boot <- errorest.cv(my.ipredknn, formula)
+  drzewa.boot <- errorest.cv(my.rpart, formula)
+  nb.boot <- errorest.cv(my.bayes, formula)
+  
+  knn.632 <- errorest.cv(my.ipredknn, formula)
+  drzewa.632 <- errorest.cv(my.rpart, formula)
+  nb.632 <- errorest.cv(my.bayes, formula)
+
+  wyniki <- data.frame(
+    Metoda = c(
+      paste0(best.k, "-NN"),
+      "Drzewo",
+      "Naive Bayes"
+    ),
+    "cross-validation" = c(
+      procent(knn.cv$error),
+      procent(drzewa.cv$error),
+      procent(nb.cv$error)
+    ),
+    "bootstrap" = c(
+      procent(knn.boot$error),
+      procent(drzewa.boot$error),
+      procent(nb.boot$error)
+    ),
+    "632plus" = c(
+      procent(knn.632$error),
+      procent(drzewa.632$error),
+      procent(nb.632$error)
+    )
+    
+  )
+  return(wyniki)
+}
+```
+
+```{r crossvalidation_1, tab.cap = "\\label{tab:schematy1}Wyniki schematów walidacyjnych."}
+wyniki <- generuj.wyniki.errorest()
+
+kable(wyniki, format = "latex") %>% 
+kable_styling(latex_options = "HOLD_position")
+```
+
+Najlepsze wyniki uzyskano dla klasyfikatora naive Bayes, który osiągnął najniższe wartości błędu klasyfikacji we wszystkich trzech schematach walidacyjnych. Jego błędy wynoszą około 5%, co świadczy o wysokiej skuteczności tej metody w separowaniu klas w zbiorze `Wine`. Algorytm drzewa był drugi co do zgodności separacji klas, zaś algorytm oparty na najbliższych sąsiadach poradził sobie najgorzej w każdym z użytych schematów.
+
+\newpage
+
+## Klasyfikacja dla sześciu najlepszych cech
+
+### Klasyfikacja przy użyciu algorytmu $k$-NN
+
+```{r powtorka_z_rozrywki}
+cechy <- c("class", as.character(anova.df$cecha[malejaco.wg.anova][1:6]))
+wine.anova <- wine[, cechy]
+stand.wine.anova <- scale(x = wine.anova[, -1])
+
+zbior.do.nauki <- wine.anova[probka.do.nauki, ]
+zbior.do.testow <- wine.anova[-probka.do.nauki, ]
+
+zbior.do.nauki.stand <- stand.wine.anova[probka.do.nauki, ]
+zbior.do.testow.stand <- stand.wine.anova[-probka.do.nauki, ]
+
+klasy.treningowe <- zbior.do.nauki$class
+klasy.testowe <- zbior.do.testow$class
+
+cechy.treningowe <- zbior.do.nauki[, -1]
+cechy.testowe <- zbior.do.testow[, -1]
+
+cechy.treningowe.stand <- zbior.do.nauki.stand[, -1]
+cechy.testowe.stand <- zbior.do.testow.stand[, -1]
+```
+
+Zbadaliśmy działanie algorytmów klasyfikacji biorących wszystkie cechy pod uwagę, więc dalszym krokiem w badaniu będzie ograniczenie się wyłącznie do najlepiej klasyfikujących cech, a następnie nowe wyniki obserwacji porównamy z poprzednimi.
+
+```{r powtorka_z_rozrywki2, fig.cap = "\\label{fig:najlepsze_k}Wykres błędu klasyfikacji k-NN dla kolejnej liczby sąsiadów k."}
+best.k <- najlepsze.k(range = 20,
+                      iters = 400,
+                      rysuj = TRUE)
+
+knn.train.pred6 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.treningowe.stand,
+  cl =  klasy.treningowe,
+  k = best.k
+)
+
+knn.test.pred6 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.testowe.stand,
+  cl =  klasy.treningowe,
+  k = best.k
+)
+
+knn.train.pred10 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.treningowe.stand,
+  cl =  klasy.treningowe,
+  k = 10
+)
+
+knn.test.pred10 <- knn(
+  train = cechy.treningowe.stand,
+  test = cechy.testowe.stand,
+  cl =  klasy.treningowe,
+  k = 10
+)
+
+drzewa.model <- rpart(class ~ .,
+                      data = zbior.do.nauki,
+                      control = rpart.control(
+                        cp = .03,
+                        minsplit = 10,
+                        maxdepth = 10
+                      ))
+
+drzewa.train.pred <- predict(drzewa.model, newdata = zbior.do.nauki, type = "class")
+drzewa.test.pred <- predict(drzewa.model, newdata = zbior.do.testow, type = "class")
+
+nb.model <- naiveBayes(class ~ ., data = zbior.do.nauki)
+
+nb.train.pred <- predict(nb.model, zbior.do.nauki)
+nb.test.pred <- predict(nb.model, zbior.do.testow)
+```
+
+Na podstawie testu ANOVA wybierzemy sześć najlepiej dyskryminujących cech win, czyli: `r anova.df$cecha[1:6]`. Zmniejsza się zatem informacja o naszych obserwacjach, przez co algorytmy klasyfikacji będą działały w nieco inny sposób, na przykład za najlepiej klasyfikujące $k$ przyjmiemy teraz `r best.k` sąsiadów (wykres \ref{fig:najlepsze_k}). 
+
+\newpage
+
+Przyjrzyjmy się macierzom pomyłek dla algorytmu `r best.k`-NN.
+
+```{r heatmap2_knn9, fig.cap = "\\label{fig:knnbest2}Macierze pomyłek dla algorytmu 9-NN."}
+zestawienie.heatmap(knn.train.pred6, knn.test.pred6, "9-NN - macierze pomyłek")
+```
+
+Z wykresu \ref{fig:knnbest2} wynika, że błędy wystąpiły tylko dla zbioru treningowego, dla którego niepoprawnie sklasyfikowano obserwacje klasy drugiej - pięć z nich zostało włączonych do klasy pierwszej, zaś trzy -- do trzeciej. Zbiór testowy został w pełni poprawnie sklasyfikowany.
+
+\newpage
+
+### Klasyfikacja przy użyciu drzewa klasyfikującego
+
+Model drzewa również przyjmuje inną postać dla zmienionej formuły.
+
+```{r poka_drzewo, fig.cap = "\\label{fig:drzewonowe}Model drzewa stworzonego dla formuły uwzględniającej sześć najlepiej dyskryminujących cech."}
+rpart.plot(drzewa.model, box.palette = colors.disc)
+```
+
+Różnica między poprzednim wykresem drzewa (wykres \ref{fig:drzewo2}), a tym, przedstawionym na wykresie \ref{fig:drzewonowe}, polega na innym wyborze zmiennych porównywanych z progami liczbowymi przez algorytm. W nowym drzewie cecha V7 jest porównywana nawet dwukrotnie. Wykorzystujemy tutaj model już ze zmienionymi parametrami, ponieważ w poprzedniej podsekcji osiągnęła ona wyższy wynik niż bazowe drzewo.
+
+```{r heatmap2_drzewa, fig.cap = "\\label{fig:drzewon_heatmap}Macierze pomyłek dla algorytmu wykorzystującego drzewa."}
+zestawienie.heatmap(drzewa.train.pred, drzewa.test.pred, "Drzewa - macierze pomyłek")
+```
+
+Macierz pomyłek dla algorytmu drzewa pokazuje, że niepoprawnie dopasowano trzy elementy klasy drugiej do klasy pierwszej w zbiorze treningowym, a także nastąpiły dwie pomyłki w zbiorze testowym -- również związane z klasą drugą.
+
+\newpage
+
+### Klasyfikacja przy użyciu naiwnego klasyfikatora bayesowskiego
+
+Macierz pomyłek dla metody *naive Bayes* przedstawia wykres \ref{fig:bays_heatmap}.
+
+```{r heatmap2_nb, fig.cap = "\\label{fig:bays_heatmap}Macierze pomyłek dla naiwnego klasyfikatora bayesowkiego."}
+zestawienie.heatmap(nb.train.pred, nb.test.pred, "naive Bayes - macierze pomyłek")
+```
+
+Naiwny klasyfikator bayesowski wykonał łącznie osiem pomyłek w zbiorze treningowym, z czego sześć dotyczy pomylenia klasy pierwszej z drugą (i odwrotnie), a dwie obserwacje błędnie przyporządkowano do klasy trzeciej. W zbiorze testowym wystąpiła tylko jedna pomyłka - element klasy pierwszej przyporządkowano do drugiego.
+
+### Podsumowanie klasyfikacji uwzględniającej sześć najlepszych cech
+
+Tabela \ref{tab:wyniki3} pokazuje wyniki klasyfikacji dla zbioru danych `Wine`, uwzględniającą sześć najlepiej dyskryminujących (według testu ANOVA) cech.
+
+```{r wyniki_znowu, tab.cap = "\\label{tab:wyniki3}Wyniki zastosowania poszczególnych metod klasyfikacji - formuła z sześcioma najlepszymi cechami."}
+wyniki <- data.frame(
+    Metoda = c(
+      paste0(best.k, "-NN"),
+      "Drzewo",
+      "Naive Bayes"
+    ),
+    blad.train = c(
+      blad.klasyfikacji(knn.train.pred6, testowy = FALSE),
+      blad.klasyfikacji(drzewa.train.pred, testowy = FALSE),
+      blad.klasyfikacji(nb.train.pred, testowy = FALSE)
+    ),
+    blad.test = c(
+      blad.klasyfikacji(knn.test.pred6),
+      blad.klasyfikacji(drzewa.test.pred),
+      blad.klasyfikacji(nb.test.pred)
+    )
+  )
+kable(wyniki, format = "latex") %>% 
+kable_styling(latex_options = "HOLD_position")
+```
+
+Dla wszystkich algorytmów, błąd klasyfikacji na zbiorze testowym uległ zmniejszeniu (lub pozostał taki sam) po ograniczeniu liczby cech do sześciu najlepiej rozdzielających klasy. Błąd testowy dla 9-NN wynosi 0%, co wskazuje na idealne dopasowanie modelu do zbioru testowego w tej konkretnej konfiguracji, jednak z drugiej strony posiada on największy błąd na zbiorze treningowym.
+
+Ograniczenie się tylko do sześciu z cech do separacji obserwacji wywołało poprawę zgodności dopasowania, co udowadnia, że zbyt duża liczba cech brana do dyskryminacji może być przyczyną błędnych dopasowań.
+
+Analogicznie do poprzedniej podsekcji -- przeprowadźmy jeszcze porównanie schematów walidacyjnych z funkcji `errorest`.
+
+```{r crossvalidation_3, tab.cap = "\\label{tab:schematy2}Wyniki schematów walidacyjnych."}
+wine <- wine.anova
+wyniki <- generuj.wyniki.errorest()
+
+kable(wyniki, format = "latex") %>% 
+kable_styling(latex_options = "HOLD_position")
+```
+
+W porównaniu do tabeli \ref{tab:schematy1}, wyniki działania schematów walidacji krzyżowej, bootstrapa i walidacji 632+ są do siebie bardziej zbliżone. Dla metody najbliższych sąsiadów zgodność klasyfikacji jest większa, jednak dla naiwnego klasyfikatora bayesowskiego -- odwrotnie, wciąż pozostając najlepszym klasyfikatorem w tym porównaniu.
+
+## Podsumowanie działania omawianych klasyfikatorów
+
+Najgorzej ze wszystkich metod poradziła sobie metoda $k$-NN w prawie wszystkich analizach i porównaniach. Nawet kiedy wybierano najlepsze $k$ możliwe, jego błąd przypisywania obserwacji do odpowiednich klas był największy. Mimo tego nadal jej zgodność jest akceptowalna, najwyżej sięgając blisko 83%, a nawet zdarzyła się sytuacja, w której bezbłędnie przypisał obserwacje do klas dla zbioru testowego.
+
+Drzewa klasyfikacyjne poprawnie klasyfikowały wina do ich typów w każdej analizie, w szczególności po zamianie parametrów -- warto zaznaczyć, iż nie uwzględniliśmy wyszukiwania najlepszych możliwych parametrów dla drzewa, więc zostaje w przypadku tego algorytmu teoretyczna możliwość poprawy jego działania. Drzewa separujące są dobrym wyborem dla zbioru danych `Wine`.
+
+Klasyfikator *naive Bayes* osiągał najlepsze wyniki dla każdego ze schematów walidacji: walidacji krzyżowej, bootstrapa oraz 632+, więc w ogólności jest on najlepszym algorytmem do problemu klasyfikacji danych `Wine`. Zgodność przyporządkowania bayesowskiego klasyfikatora jest tylko nieznacznie mniejsza od algorytmu wykorzystującego drzewa dla naszej ramki danych. 
+
+Omawiane metody są znanymi i skutecznymi algorytmami klasyfikacji danych, czego niniejsza analiza była przykładem. Wybór najlepszej z nich zależy wyłącznie od ilości klas, cechach oraz całej struktury ramki danych.
